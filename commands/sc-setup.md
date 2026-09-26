@@ -1,10 +1,14 @@
 ---
-description: Set up semantic-compact — choose provider (TypeSafe direct / OpenRouter / custom), save the API key and config, then verify end-to-end
+description: Set up semantic-compact — choose provider (TypeSafe direct / OpenRouter / custom) and configure everything except the API key, which the user adds privately
 ---
 
 Run the semantic-compact setup wizard. Conduct the conversation in the user's
-language (default to Chinese if unclear). NEVER echo, quote, or log the API
-key after the user provides it — pass it straight into the file write.
+language (default to Chinese if unclear).
+
+**Security rule — absolute:** NEVER ask the user to paste, type, or otherwise
+reveal an API key in this conversation. Anything sent in chat ends up in the
+session transcript and in requests to the model provider. The key is always
+added by the user themselves, in their own terminal, via the commands below.
 
 ## Step 1 — provider choice
 
@@ -16,43 +20,47 @@ Present exactly three options and wait for the user to pick one:
 
 ## Step 2 — preset providers (options 1 and 2)
 
-Ask ONLY for the API key, then write two files (create directories as needed).
-Use the Write tool for both — the permission prompt is expected.
+Write `~/.config/semantic-compact/config.json` (create directories as
+needed, use the Write tool; the permission prompt is expected):
 
-`~/.config/semantic-compact/env` — a single line, nothing else:
+- option 1: `{"jev": {"provider": "typesafe"}}`
+- option 2: `{"jev": {"provider": "openrouter"}}`
 
-- option 1: `TYPESAFE_API_KEY=<key>`
-- option 2: `OPENROUTER_API_KEY=<key>`
+(url/model/auth come from the built-in preset; nothing else to configure.)
 
-`~/.config/semantic-compact/config.json` — the preset (auth defaults already match):
+Then tell the user — do not run it yourself, the key must not pass through
+this conversation:
 
-- option 1: `{"jev": {"url": "https://api.typesafe.ai/v1/systemone", "model": "jev-latest"}}`
-- option 2: `{"jev": {"url": "https://openrouter.ai/api/alpha/decisions", "model": "~typesafe/jev-latest"}}`
+> 现在在你自己的终端(不是本会话)执行,把 key 写入配置:
+>
+> ```sh
+> mkdir -p ~/.config/semantic-compact
+> printf 'JEV_API_KEY=<你的key>\n' > ~/.config/semantic-compact/env
+> ```
+>
+> OpenRouter 的 key 在 https://openrouter.ai/keys 创建(TypeSafe 的在
+> https://console.typesafe.ai/keys)。写完回来告诉我,我帮你验证。
 
 ## Step 3 — fully custom (option 3)
 
-Offer two sub-modes and let the user choose:
-
-**(a) 逐项引导** — walk through the fields ONE at a time, showing the default
-and accepting a blank answer to keep it:
+Walk through the non-secret fields ONE at a time in chat, showing the
+default and accepting a blank answer to keep it:
 
 1. `url` (jev.url) — required, no default. Example: `https://your-gateway.example/v1/decisions`
 2. `model` (jev.model) — required, no default
-3. API key — optional; blank means "configure later"
-4. `auth_header` (jev.auth_header) — default `Authorization`; e.g. `x-api-key`
-5. `auth_scheme` (jev.auth_scheme) — default `Bearer`; empty string means send the raw key
-6. `timeout_ms` (jev.timeout_ms) — default `10000`
+3. `auth_header` (jev.auth_header) — default `Authorization`; e.g. `x-api-key`
+4. `auth_scheme` (jev.auth_scheme) — default `Bearer`; empty string means send the raw key
+5. `timeout_ms` (jev.timeout_ms) — default `10000`
 
-Then write `~/.config/semantic-compact/env` (only if a key was given, as
-`JEV_API_KEY=<key>`) and `~/.config/semantic-compact/config.json` as
-`{"jev": {"url": ..., "model": ..., "auth_header": ..., "auth_scheme": ..., "timeout_ms": ...}}`
+Then write `~/.config/semantic-compact/config.json` as
+`{"jev": {"provider": "custom", "url": ..., "model": ..., "auth_header": ..., "auth_scheme": ..., "timeout_ms": ...}}`
 (omit fields kept at defaults).
 
-**(b) 手写模板** — write `~/.config/semantic-compact/config.json` with every
-field above as an empty string / the numeric defaults, tell the user to fill
-in `url` and `model` by hand, and stop after Step 4 is skipped.
+For the key, give the same self-service instruction as Step 2 (the env file
+line `JEV_API_KEY=<你的key>`; alternatively they may set `"api_key"` in the
+config.json by hand).
 
-## Step 4 — verify (only when a key was saved)
+## Step 4 — verify (optional, only when the user says the key is in place)
 
 Run, in order:
 
@@ -65,11 +73,14 @@ echo '{"session_id":"sc-setup-verify","transcript_path":"'"$CLAUDE_PLUGIN_ROOT"'
 ```
 
 Interpretation:
-- A `{"systemMessage": ...}` line mentioning compact/clear → fully working.
-- Empty output with exit 0 → the hook ran but stayed silent; check
-  `"$CLAUDE_PLUGIN_ROOT"/data/logs/` (or `~/.claude/plugins/data/`) for the
-  decision line and report `skip_reason`.
+- A `{"systemMessage": ...}` line suggesting compact/clear → fully working.
+- Empty output with exit 0 → the hook ran but stayed silent; check the
+  latest decision log line (under `~/.claude/plugins/data/` or the plugin's
+  `data/logs/`) and report its `skip_reason`.
 - Non-zero exit or a setup error → report the message and the last log line.
+
+Never print the key or the env file's contents at any point. To confirm the
+file exists, check its path only.
 
 ## Step 5 — summary
 
