@@ -149,7 +149,7 @@ carries a one-time notice explaining how to configure it.
     "auth_scheme": "Bearer",
     "timeout_ms": 10000
   },
-  "cooldown": { "prompts": 8, "seconds": 600 },
+  "cooldown": { "prompts": 4, "seconds": 300 },
   "history": {
     "max_user_prompts": 8,
     "max_assistant_outcomes": 3,
