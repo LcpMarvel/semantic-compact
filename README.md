@@ -1,131 +1,141 @@
 # semantic-compact
 
-A Claude Code plugin that suggests running `/compact` when a new task begins.
+[![CI](https://github.com/LcpMarvel/semantic-compact/actions/workflows/ci.yml/badge.svg)](https://github.com/LcpMarvel/semantic-compact/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/LcpMarvel/semantic-compact)](https://github.com/LcpMarvel/semantic-compact/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Long coding sessions accumulate tool results, debug logs, and exploration
-history from tasks that are already done. This plugin watches every prompt
-you submit, asks a typed LLM judge whether you just crossed a task boundary,
-and — only at high confidence — shows a one-line reminder to consider
-`/compact`.
+A Claude Code plugin that catches the moment a task changes — and hands the
+decision back to you before the old context gets dragged along.
+
+Long sessions pile up tool results, debug logs, and exploration history from
+work that is already done. Token thresholds only tell you the context is
+*full*; they can't tell you it's *stale*. semantic-compact watches every
+prompt you submit, asks a typed LLM judge whether you just crossed a task
+boundary, and — only at high confidence — returns the prompt to you with a
+suggestion.
 
 > Compact when the task changes — not merely when the context is full.
 
-It **never** compacts by itself, never blocks or rewrites your prompt, and
-stays completely silent (and harmless) on every failure path.
+**It never compacts or clears anything by itself, never rewrites your
+prompt, and every failure path degrades to silence.**
+
+## What it looks like
+
+Switch to an unrelated task mid-session:
+
+```
+❯ 好了换任务,现在帮我写一个 ffmpeg 转码脚本
+
+  Semantic Compact: this looks like a new, unrelated task.
+  The previous context is unlikely to be useful for it.
+  Consider /clear for a fresh start, or /compact to keep a summary.
+  (suggestion only — nothing was cleared)
+
+  The prompt was returned to you, not lost. Run /clear or /compact now,
+  then re-send it; re-sending it as-is simply continues with the current
+  context.
+```
+
+Run `/clear`, re-send (↑ + Enter), done. Or just re-send to continue with
+the old context — your call, every time.
 
 ## How it works
 
 ```
 UserPromptSubmit hook
-  → parse transcript: recent real user prompts, assistant outcomes, files touched
-  → build a compact task-state summary (~a few KB)
-  → one request to the OpenRouter Decisions API (model ~typesafe/jev-latest)
-     asking four calibrated yes/no probability questions:
+  → parse transcript: recent real prompts, assistant outcomes, files touched
+  → build a compact task-state summary (a few KB, not the whole history)
+  → one request to a Jev Decisions endpoint (OpenRouter or TypeSafe direct)
+     asking four typed yes/no probability questions:
        p(new_task), p(depends_on_previous_context),
        p(previous_task_complete), p(shares_context_with_previous_task)
   → three-way decision:
-       same task / depends on history      → silence
-       new task, shares project context    → suggest /compact (a summary still helps)
-       new task, essentially unrelated     → suggest /clear (even a summary is dead weight)
-  → suggestion comes back BEFORE the prompt runs:
-       block mode (default) returns the prompt to you with the reason —
-       run /clear or /compact, then re-send it (↑ + Enter); re-sending
-       as-is just continues with the current context
-       remind mode only shows a warning while the prompt proceeds
+       same task / depends on history     → silence
+       new task, shares project context   → suggest /compact (a summary still helps)
+       new task, essentially unrelated    → suggest /clear (even a summary is dead weight)
 ```
 
 The compact-vs-clear split exists because `/compact` itself costs a
-summarization pass and keeps a summary in context. When the new task shares
-the project (`p_shared >= shared_context_min`), that summary still earns its
-tokens; when it does not, `/clear` is the cheaper, cleaner reset.
+summarization pass and keeps a summary in context: when the new task shares
+the project that summary still earns its tokens; when it doesn't, `/clear`
+is the cheaper, cleaner reset.
 
-Design principles, in order: **precision over recall** (a missed switch
-costs nothing, a false nag costs trust), **reminder only** (the decision to
-compact is always yours), **fail open** (missing key, timeout, HTTP error,
-unreadable transcript, malformed response — every path degrades to silence
-and the prompt proceeds normally).
+Judgment behavior:
 
-Follow-ups like "给它补一下测试" / "fix that", cross-layer shifts that serve
-the same goal (backend → its frontend button), questions about earlier work,
-and brief tangents are all treated as the same task. "登录先到这里，现在做
-pricing 页面" is a boundary.
+- **Calibrated on real sessions.** Thresholds ship at
+  `p_new ≥ 0.85 AND p_dep ≤ 0.30`; measured clusters are follow-ups
+  0.04–0.38, coding tangents ~0.80, genuine switches 0.89–0.98.
+- **Continuations stay silent.** Cross-layer shifts that serve one goal
+  (OAuth backend → its login button), "给它补一下测试"-style follow-ups,
+  questions about earlier work, and brief tangents are the same task.
+- **Cooldown, not nagging.** After one suggestion the session stays quiet
+  for 4 prompts / 5 minutes — and clearing the conversation rearms it
+  immediately, because acting on a suggestion means it worked.
+- **Cheap.** ~1 s and ~$0.00003 per judged prompt; slash commands and the
+  very first prompt of a session skip the judge entirely.
 
 ## Install
-
-Standard plugin install (this repository is its own marketplace):
 
 ```sh
 claude plugin marketplace add LcpMarvel/semantic-compact
 claude plugin install semantic-compact@semantic-compact
 ```
 
-Installing through `/plugin` inside a session also opens the configuration
-dialog right away (provider + API key — see "Provider & API key" below).
-No binary to install by hand: on the first prompt after install the plugin
-provisions itself with a prebuilt static binary for your platform (macOS
-arm64/x64, Linux amd64/arm64), checksum-verified from the matching GitHub
-release, and `claude plugin update semantic-compact` re-provisions on
-upgrades. Restart Claude Code (or start a new session) after installing.
+No prerequisites: on the first prompt after install the plugin provisions
+itself with a checksum-verified static binary for your platform (macOS
+arm64/x64, Linux amd64/arm64), and `claude plugin update semantic-compact`
+re-provisions on upgrades. Restart Claude Code after installing.
 
 Uninstall: `claude plugin uninstall semantic-compact` and optionally
 `claude plugin marketplace remove semantic-compact`.
 
-Local development instead of installing:
+## Setup
 
-```sh
-cargo build --release && cp target/release/semantic-compact bin/
-claude --plugin-dir /path/to/semantic-compact
-```
+Judgments are served over the Jev Decisions API — pick a provider; only an
+API key is required:
 
-Inside an interactive session, `/reload-plugins` picks up code changes.
+| provider | endpoint | model | key from |
+|---|---|---|---|
+| `openrouter` (default) | `openrouter.ai/api/alpha/decisions` | `~typesafe/jev-latest` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `typesafe` | `api.typesafe.ai/v1/systemone` | `jev-latest` | [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
+| `custom` | you set `jev.url` / `jev.model` | yours | yours |
+
+Pick one of:
+
+1. **`/sc-setup`** (most reliable) — the wizard shipped with the plugin:
+   provider choice, then only the key for presets; field-by-field walk
+   (or a written template) for fully custom setups; live verification at
+   the end. The wizard never takes your key in conversation — it hands you
+   a one-liner to run in your own terminal, so the key never enters the
+   session transcript or any request context.
+2. **Install-time dialog** — installing via `/plugin` inside a session
+   opens the plugin's configuration dialog (`JEV_PROVIDER`, `JEV_API_KEY`:
+   masked input, stored in the OS keychain).
+3. **`/plugin configure semantic-compact`** — the same dialog any time.
+   CLI form:
+   `claude plugin install semantic-compact@semantic-compact --config JEV_PROVIDER=typesafe --config JEV_API_KEY=...`
+4. **Files / environment** — see below.
+
+> Version note: on some Claude Code builds (verified on 2.1.283) dialog /
+> `--config` values are stored but the `CLAUDE_PLUGIN_OPTION_*` variables
+> are not exported to hook processes, so the plugin never sees them. If the
+> one-time setup notice keeps appearing after configuring through the
+> dialog, use `/sc-setup` or the file/env path — they work everywhere.
 
 ## Configuration
 
-No configuration is required besides an API key. Everything else has
-defaults. Layers, lowest to highest:
+Nothing is required beyond the key; everything else has defaults. Layers,
+lowest to highest:
 
 1. built-in defaults (compiled in)
 2. `<plugin root>/config.json` — maintainer-tuned defaults
 3. `~/.config/semantic-compact/config.json` — your overrides
    (`$XDG_CONFIG_HOME/semantic-compact/config.json` if set)
-4. environment variables — highest priority
+4. environment variables
 
-### Provider & API key
+API key resolution, high to low:
 
-Judgments are served over the Jev Decisions API. Pick a provider; only the
-API key is required, everything else has a preset:
-
-| provider | endpoint | model | key from |
-|---|---|---|---|
-| `openrouter` (default) | `openrouter.ai/api/alpha/decisions` | `~typesafe/jev-latest` | openrouter.ai/keys |
-| `typesafe` | `api.typesafe.ai/v1/systemone` | `jev-latest` | console.typesafe.ai/keys |
-| `custom` | you set `jev.url` / `jev.model` | yours | yours |
-
-Four ways to configure, pick whichever you like:
-
-1. **`/sc-setup`** (most reliable) — the wizard command shipped with this
-   plugin: walks through provider choice, asks only for the key on presets,
-   walks every field one by one (or writes a template) for fully custom
-   setups, then runs a live verification.
-2. **Install-time dialog** — installing via `/plugin` inside a session opens
-   the plugin's configuration dialog automatically: choose `JEV_PROVIDER`,
-   paste `JEV_API_KEY` (masked input; stored in the OS keychain, not
-   settings.json).
-3. **`/plugin configure semantic-compact`** — the same dialog, any time.
-   CLI equivalent at install:
-   `claude plugin install semantic-compact@semantic-compact --config JEV_PROVIDER=typesafe --config JEV_API_KEY=...`
-4. **Files / environment** — power-user path, see below.
-
-> Version note: on some Claude Code builds (verified on 2.1.283) the
-> dialog/`--config` values are stored correctly but the
-> `CLAUDE_PLUGIN_OPTION_*` variables are not exported to hook processes, so
-> the plugin never sees them. If the one-time setup notice keeps appearing
-> after configuring through the dialog, use `/sc-setup` or the file/env
-> path instead — they work everywhere.
-
-Key resolution order (high to low):
-
-1. `CLAUDE_PLUGIN_OPTION_JEV_API_KEY` — the dialog/`--config` value
+1. `CLAUDE_PLUGIN_OPTION_JEV_API_KEY` — the dialog / `--config` value
 2. `JEV_API_KEY`, `OPENROUTER_API_KEY`, or `TYPESAFE_API_KEY` in the environment
 3. `"jev": { "api_key": "..." }` in a config JSON layer
 4. `~/.config/semantic-compact/env` (KEY=VALUE lines)
@@ -135,18 +145,18 @@ Key resolution order (high to low):
 Without a key the plugin stays inert, and the first prompt of a session
 carries a one-time notice explaining how to configure it.
 
-### Full option reference
+Full option reference:
 
 ```jsonc
 {
   "thresholds": { "new_task_min": 0.85, "depends_max": 0.3, "shared_context_min": 0.5 },
   "jev": {
-    "provider": "openrouter",
+    "provider": "openrouter",          // openrouter | typesafe | custom
     "url": "(filled from the provider preset)",
     "model": "(filled from the provider preset)",
     "api_key": null,
-    "auth_header": "Authorization",
-    "auth_scheme": "Bearer",
+    "auth_header": "Authorization",    // e.g. x-api-key for other gateways
+    "auth_scheme": "Bearer",           // empty string = send the raw key
     "timeout_ms": 10000
   },
   "cooldown": { "prompts": 4, "seconds": 300 },
@@ -159,93 +169,84 @@ carries a one-time notice explaining how to configure it.
     "new_prompt_chars": 3000,
     "state_char_limit": 10000
   },
-  "skip": { "min_prior_prompts": 2 },
+  "skip": { "min_prior_prompts": 1 },
   "reminder": { "mode": "block", "message": "...", "clear_message": "..." },
   "logging": { "decisions": false, "debug": false }
 }
 ```
 
-- `reminder.mode` — `"block"` (default) or `"remind"`. A warning that
-  appears while the model is already running is hard to act on, so by
-  default a suggestion **returns the prompt to you** before it is
-  processed: the reason is shown, the prompt is not lost — run `/clear` or
-  `/compact`, then re-send it (↑ + Enter); re-sending as-is simply
-  continues with the current context. Nothing is ever cleared or compacted
-  automatically, and every failure path stays silent rather than blocking.
-  Set `"remind"` for the non-intrusive warning-only behavior.
 Environment overrides (highest priority): `SC_NEW_TASK_MIN`,
 `SC_DEPENDS_MAX`, `SC_SHARED_CONTEXT_MIN`, `SC_REMINDER_MODE`,
-`JEV_DECISIONS_URL`, `JEV_MODEL`,
-`JEV_AUTH_HEADER`, `JEV_AUTH_SCHEME`, `JEV_TIMEOUT_MS`,
 `SC_COOLDOWN_PROMPTS`, `SC_COOLDOWN_SECONDS`, `SC_MAX_PROMPTS`,
-`SC_MIN_PRIOR_PROMPTS`, `SC_LOG_DECISIONS`, `SC_DEBUG`. The provider also reads
-`CLAUDE_PLUGIN_OPTION_JEV_PROVIDER` (set by the plugin dialog); explicit
-`JEV_DECISIONS_URL` / `JEV_MODEL` always win over presets.
+`SC_MIN_PRIOR_PROMPTS`, `SC_LOG_DECISIONS`, `SC_DEBUG`,
+`JEV_DECISIONS_URL`, `JEV_MODEL`, `JEV_AUTH_HEADER`, `JEV_AUTH_SCHEME`,
+`JEV_TIMEOUT_MS`. The provider also reads `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER`
+(set by the plugin dialog); explicit `JEV_DECISIONS_URL` / `JEV_MODEL`
+always win over presets.
 
-Notes:
+Notable semantics:
 
-- `auth_header`/`auth_scheme` exist so non-OpenRouter Decisions deployments
-  (e.g. `x-api-key` with no scheme) work without code changes.
-- `cooldown`: after one suggestion, further suggestions for that session are
-  suppressed until **both** N prompts have passed **and** M seconds have
-  elapsed — one reminder per task switch, not a nag. Clearing the
-  conversation (history suddenly below the floor) rearms it immediately:
-  acting on the suggestion means it has done its job.
-- `skip.min_prior_prompts`: sessions younger than this many real prompts are
-  not judged (nothing worth compacting yet, saves latency and cost).
-- `debug_logging` writes extra detail (raw task state, judge response) to
-  `data/logs/debug-*.jsonl`. It records prompt text; keep it off by default.
+- `reminder.mode` — `"block"` (default) or `"remind"`. A warning that
+  appears while the model is already running can't be acted on, so a
+  suggestion returns the prompt to you **before** it is processed: the
+  reason is shown, the prompt is not lost — run `/clear` or `/compact`,
+  then re-send it; re-sending as-is simply continues with the current
+  context. Nothing is ever cleared automatically, and failure paths never
+  block. `"remind"` gives the non-intrusive warning-only behavior.
+- `cooldown` — after one suggestion the session is quiet until **both** N
+  prompts have passed **and** M seconds elapsed. Clearing the conversation
+  (history suddenly below the floor) rearms it immediately.
+- `skip.min_prior_prompts` — the first prompt of a session has nothing to
+  compare against; the second already judges fine (one prior exchange is
+  enough to spot a full topic switch).
+- `jev.auth_header` / `auth_scheme` — non-OpenRouter gateways work without
+  code changes.
 
 ### Runtime cost
 
-One judge call per prompt (~0.7–1.5 s latency, ~$0.00003 each with the
-default model). Sessions below `min_prior_prompts` and slash commands are
-skipped without a call.
+One judge call per judged prompt (~0.7–1.5 s latency, ~$0.00003 each with
+the default model).
 
-## Data & privacy
+## Privacy
 
-- What leaves the machine: the task-state summary only — recent user prompt
+- **What leaves the machine:** the task-state summary only — recent prompt
   texts, short assistant outcome summaries, touched file paths, and the new
   prompt. Never the full transcript, tool outputs, or file contents.
-- The API key is read at runtime, never logged, never committed.
+- **The API key** is read at runtime from env/config/keychain, never
+  logged, never committed.
 - **Local logging is opt-in.** A fresh install writes nothing but the
-  cooldown state. If you want a judgment log (e.g. to review suggestions or
-  help calibrate thresholds), enable it:
-  `"logging": { "decisions": true }` in your config JSON, or
-  `SC_LOG_DECISIONS=1`. It then appends one JSONL line per judgment to
-  `<data dir>/logs/decisions-YYYY-MM-DD.jsonl` — timestamp, session id,
-  prompt hash + 120-char preview, the four probabilities, decision,
-  thresholds, latency, cost, error. `human_label` / `outcome` stay null
-  until you fill them in by hand.
-- `logging.debug` additionally records the raw task state and judge
-  responses (`debug-*.jsonl`); it records more prompt text — leave it off
-  unless you are debugging.
+  cooldown state. `"logging": { "decisions": true }` (or
+  `SC_LOG_DECISIONS=1`) appends one JSONL line per judgment — timestamp,
+  session id, prompt hash + 120-char preview, the four probabilities,
+  decision, thresholds, latency, cost, error. `logging.debug`
+  additionally records the raw task state and judge responses. Nothing is
+  ever uploaded.
 - The data dir is `SC_DATA_DIR` → `CLAUDE_PLUGIN_DATA` (installed plugins)
-  → `<plugin root>/data` (local dev). It is gitignored; nothing is uploaded.
+  → `<plugin root>/data` (local dev). It is gitignored.
 
 ### Reviewing your own data
 
-The log doubles as a calibration dataset. To audit the plugin, edit the
-`human_label` field by hand (`same_task` | `new_task` | `depends_on_context`
-| `uncertain`), then look at precision first:
+The log doubles as a calibration dataset. Edit `human_label` by hand
+(`same_task` | `new_task` | `depends_on_context` | `uncertain`) and look
+at precision first:
 
 ```sh
-jq -s '[.[] | select(.decision=="SUGGEST_COMPACT")] | length' ~/.claude/plugins/data/semantic-compact-*/logs/decisions-*.jsonl
-jq -s '[.[] | select(.human_label=="new_task")] | length' ~/.claude/plugins/data/semantic-compact-*/logs/decisions-*.jsonl
+jq -s '[.[] | select(.decision=="SUGGEST_CLEAR")] | length' \
+  ~/.claude/plugins/data/semantic-compact-*/logs/decisions-*.jsonl
 ```
 
-False positives (suggested, you kept working) and false negatives (silent,
-but you compacted anyway) are exactly the samples worth tuning thresholds
-and judge wording on.
+False positives (blocked, you just re-sent) and false negatives (silent,
+but you cleared anyway) are exactly the samples thresholds should be tuned
+on — ideally with a PR.
 
 ## Development
 
 ```sh
-cargo build --release && cp target/release/semantic-compact bin/   # dev binary for --plugin-dir
-cargo test                    # unit + integration tests, mocked judge
+cargo build --release && cp target/release/semantic-compact bin/  # dev binary for --plugin-dir
+cargo test                    # 33 unit + integration tests, mocked judge
 cargo clippy && cargo fmt
-sh scripts/setup.sh           # same provisioning the Setup hook does
-claude plugin validate .      # plugin manifest check
+sh scripts/setup.sh           # same provisioning the hook entry point does
+claude plugin validate .
 ```
 
 Live smoke against the real Decisions API (uses `.env` in the repo root):
@@ -255,33 +256,38 @@ echo '{"session_id":"smoke","transcript_path":"'"$PWD"'/testdata/fixtures/oauth-
        "cwd":"'"$PWD"'","hook_event_name":"UserPromptSubmit",
        "prompt":"登录先到这里。现在帮我重新设计 pricing 页面"}' \
   | ./bin/semantic-compact
-# → {"systemMessage":"Semantic Compact: this looks like a new task. ..."}
+# → {"decision":"block","reason":"Semantic Compact: this looks like a new task. ..."}
 ```
 
-End-to-end in Claude Code (here via the zclaude wrapper):
-
-```sh
-zclaude --plugin-dir /path/to/semantic-compact -p "..."   # watch for the reminder
-```
+The fixtures under `testdata/fixtures/` double as regression snapshots for
+the (undocumented, internal) transcript format — verified against Claude
+Code 2.1.283; if a future version changes the layout, `cargo test` is the
+canary.
 
 Releases are cut from the Actions tab (`release` workflow): it bumps
-`Cargo.toml` + `plugin.json` to the given version, tags, builds the four
-platform binaries, and attaches them plus `SHA256SUMS` to the GitHub
-release. The Setup hook installs from there.
+`Cargo.toml` + `plugin.json`, tags, builds the four platform binaries with
+`SHA256SUMS`, and publishes the GitHub release the setup script installs
+from. Installed users update by version — any change to plugin content
+(commands, hooks, manifest, binary) must ship as a release with a bumped
+version; an unreleased push to `main` updates the marketplace clone but
+never the installed cache.
 
-Installed users update by version: any change to plugin content (commands,
-hooks, manifest, binary) must ship as a release with a bumped version, then
-`claude plugin marketplace update semantic-compact && claude plugin update
-semantic-compact` picks it up. An unreleased push to `main` updates the
-marketplace clone but never the installed cache.
+### Known constraints
 
-## Known constraints
+- Claude Code's transcript JSONL is internal and may change between
+  versions; the parser is deliberately defensive and any parse failure
+  fails open to silence.
+- `UserPromptSubmit` runs synchronously, so judge latency (~1 s) is added
+  to each judged prompt; the internal timeout is 10 s, on timeout the
+  prompt proceeds normally.
 
-- Claude Code's transcript JSONL is an internal, undocumented format; the
-  parser is deliberately defensive (unknown lines skipped, any parse failure
-  → silent skip). It is verified against Claude Code 2.1.283; if a future
-  version changes the layout, `cargo test` against the fixtures is the
-  canary.
-- `UserPromptSubmit` runs synchronously before the model call, so judge
-  latency (~1 s) is added to every judged prompt. The internal timeout is
-  10 s; on timeout the prompt proceeds normally.
+## Contributing
+
+PRs welcome — especially threshold recalibrations backed by decision-log
+evidence (mask or summarize your prompts; never paste real API keys). Bug
+reports with a redacted log line (`skip_reason` / probabilities) are far
+more actionable than "it didn't fire".
+
+## License
+
+[MIT](LICENSE)
