@@ -2,21 +2,23 @@
 description: Set up semantic-compact — choose provider (TypeSafe direct / OpenRouter / custom) and configure everything except the API key, which the user adds privately
 ---
 
-Run the semantic-compact setup wizard. Conduct the conversation in the user's
-language (default to Chinese if unclear).
+Run the semantic-compact setup wizard. Conduct the conversation in the
+user's language (default to English if unclear).
 
-**Security rule — absolute:** NEVER ask the user to paste, type, or otherwise
-reveal an API key in this conversation. Anything sent in chat ends up in the
-session transcript and in requests to the model provider. The key is always
-added by the user themselves, in their own terminal, via the commands below.
+**Security rule — absolute:** NEVER ask the user to paste, type, or
+otherwise reveal an API key in this conversation. Anything sent in chat
+ends up in the session transcript and in requests to the model provider.
+The key is always added by the user themselves, in their own terminal, via
+the commands below.
 
 ## Step 1 — provider choice
 
 Present exactly three options and wait for the user to pick one:
 
-1. **TypeSafe 官方直连** — Jev 官方 API,key 在 https://console.typesafe.ai/keys 创建
-2. **OpenRouter** — key 在 https://openrouter.ai/keys 创建
-3. **完全自定义** — 自己填 endpoint / model / 鉴权方式
+1. **TypeSafe direct** — the official Jev API; create a key at
+   https://console.typesafe.ai/keys
+2. **OpenRouter** — create a key at https://openrouter.ai/keys
+3. **Fully custom** — your own endpoint / model / auth
 
 ## Step 2 — preset providers (options 1 and 2)
 
@@ -31,15 +33,16 @@ needed, use the Write tool; the permission prompt is expected):
 Then tell the user — do not run it yourself, the key must not pass through
 this conversation:
 
-> 现在在你自己的终端(不是本会话)执行,把 key 写入配置:
+> Now run this in your own terminal (not this session) to store the key:
 >
 > ```sh
 > mkdir -p ~/.config/semantic-compact
-> printf 'JEV_API_KEY=<你的key>\n' > ~/.config/semantic-compact/env
+> printf 'JEV_API_KEY=<your-key>\n' > ~/.config/semantic-compact/env
 > ```
 >
-> OpenRouter 的 key 在 https://openrouter.ai/keys 创建(TypeSafe 的在
-> https://console.typesafe.ai/keys)。写完回来告诉我,我帮你验证。
+> Create an OpenRouter key at https://openrouter.ai/keys (TypeSafe keys at
+> https://console.typesafe.ai/keys). Tell me once it is in place and I will
+> verify the setup.
 
 ## Step 3 — fully custom (option 3)
 
@@ -56,9 +59,9 @@ Then write `~/.config/semantic-compact/config.json` as
 `{"jev": {"provider": "custom", "url": ..., "model": ..., "auth_header": ..., "auth_scheme": ..., "timeout_ms": ...}}`
 (omit fields kept at defaults).
 
-For the key, give the same self-service instruction as Step 2 (the env file
-line `JEV_API_KEY=<你的key>`; alternatively they may set `"api_key"` in the
-config.json by hand).
+For the key, give the same self-service instruction as Step 2 (the env
+file line `JEV_API_KEY=<your-key>`; alternatively they may set `"api_key"`
+in the config.json by hand).
 
 ## Step 4 — verify (optional, only when the user says the key is in place)
 
@@ -69,15 +72,18 @@ sh "$CLAUDE_PLUGIN_ROOT/scripts/setup.sh"
 ```
 
 ```sh
-echo '{"session_id":"sc-setup-verify","transcript_path":"'"$CLAUDE_PLUGIN_ROOT"'/testdata/fixtures/oauth-session.jsonl","cwd":"'"$CLAUDE_PLUGIN_ROOT"'/hooks","hook_event_name":"UserPromptSubmit","prompt":"登录先到这里。现在帮我重新设计 pricing 页面"}' | "$CLAUDE_PLUGIN_ROOT/bin/semantic-compact"
+echo '{"session_id":"sc-setup-verify","transcript_path":"'"$CLAUDE_PLUGIN_ROOT"'/testdata/fixtures/oauth-session.jsonl","cwd":"'"$CLAUDE_PLUGIN_ROOT"'/hooks","hook_event_name":"UserPromptSubmit","prompt":"Enough of the login work — now redesign the pricing page"}' | "$CLAUDE_PLUGIN_ROOT/bin/semantic-compact"
 ```
 
 Interpretation:
-- A `{"systemMessage": ...}` line suggesting compact/clear → fully working.
+- A `{"decision": "block", ...}` line suggesting compact/clear → fully
+  working (the prompt is intentionally returned; re-send or clear and
+  re-send as you like).
 - Empty output with exit 0 → the hook ran but stayed silent; check the
-  latest decision log line (under `~/.claude/plugins/data/` or the plugin's
-  `data/logs/`) and report its `skip_reason`.
-- Non-zero exit or a setup error → report the message and the last log line.
+  latest decision log line (under `~/.claude/plugins/data/` or the
+  plugin's `data/logs/`) and report its `skip_reason`.
+- Non-zero exit or a setup error → report the message and the last log
+  line.
 
 Never print the key or the env file's contents at any point. To confirm the
 file exists, check its path only.
@@ -87,9 +93,10 @@ file exists, check its path only.
 Ask whether to enable the local decision log (default off). Present it
 exactly like this, without pushing either way:
 
-> 要不要开启本地判断日志?默认关闭。开启后每次判断会在本地写一行
-> JSONL(含 prompt 的 120 字符预览),用于复盘建议质量/校准阈值;
-> 不开启则除了冷却状态外不写任何文件。
+> Enable the local judgment log? It is off by default. When enabled, each
+> judgment appends one JSONL line locally (including a 120-char preview of
+> your prompt), useful for reviewing suggestion quality and calibrating
+> thresholds; when disabled, nothing but the cooldown state is written.
 
 If yes, write `~/.config/semantic-compact/config.json` with
 `{"logging": {"decisions": true}}` merged into whatever the earlier steps
@@ -99,4 +106,5 @@ wrote. If no, do nothing.
 
 Tell the user: which files were written where, that thresholds can be tuned
 later in `~/.config/semantic-compact/config.json` (see the plugin README),
-and that the plugin is active in new sessions (or after `/reload-plugins`).
+and that the plugin is active in new sessions (or after
+`/reload-plugins`).

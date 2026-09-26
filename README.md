@@ -24,7 +24,7 @@ prompt, and every failure path degrades to silence.**
 Switch to an unrelated task mid-session:
 
 ```
-❯ 好了换任务,现在帮我写一个 ffmpeg 转码脚本
+❯ done with the login work — now write me an ffmpeg batch transcode script
 
   Semantic Compact: this looks like a new, unrelated task.
   The previous context is unlikely to be useful for it.
@@ -66,7 +66,7 @@ Judgment behavior:
   `p_new ≥ 0.85 AND p_dep ≤ 0.30`; measured clusters are follow-ups
   0.04–0.38, coding tangents ~0.80, genuine switches 0.89–0.98.
 - **Continuations stay silent.** Cross-layer shifts that serve one goal
-  (OAuth backend → its login button), "给它补一下测试"-style follow-ups,
+  (OAuth backend → its login button), "add tests for it"-style follow-ups,
   questions about earlier work, and brief tangents are the same task.
 - **Cooldown, not nagging.** After one suggestion the session stays quiet
   for 4 prompts / 5 minutes — and clearing the conversation rearms it
@@ -254,7 +254,7 @@ Live smoke against the real Decisions API (uses `.env` in the repo root):
 ```sh
 echo '{"session_id":"smoke","transcript_path":"'"$PWD"'/testdata/fixtures/oauth-session.jsonl",
        "cwd":"'"$PWD"'","hook_event_name":"UserPromptSubmit",
-       "prompt":"登录先到这里。现在帮我重新设计 pricing 页面"}' \
+       "prompt":"Enough of the login work — now redesign the pricing page"}' \
   | ./bin/semantic-compact
 # → {"decision":"block","reason":"Semantic Compact: this looks like a new task. ..."}
 ```
