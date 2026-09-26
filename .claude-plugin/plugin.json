@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "semantic-compact",
+  "version": "0.1.0",
+  "description": "Suggests running /compact when a new task begins: task-boundary detection on every prompt, reminder only — never auto-compacts.",
+  "author": {
+    "name": "LcpMarvel"
+  },
+  "keywords": ["compact", "context", "task-boundary", "hooks"]
+}

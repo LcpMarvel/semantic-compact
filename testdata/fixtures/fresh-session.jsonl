@@ -1,0 +1,3 @@
+{"type":"mode"}
+{"type":"user","isSidechain":false,"timestamp":"2026-09-26T11:00:00.000Z","uuid":"f1","parentUuid":null,"message":{"role":"user","content":"帮我看看 README 里有没有拼写错误"}}
+{"type":"assistant","isSidechain":false,"timestamp":"2026-09-26T11:00:20.000Z","uuid":"f2","parentUuid":"f1","message":{"role":"assistant","content":[{"type":"text","text":"读了 README,没有发现拼写错误。"}],"usage":{}}}

@@ -1,0 +1,13 @@
+# local runtime state and calibration logs
+data/
+
+# rust build artifacts and locally provisioned binary
+/target/
+/bin/
+
+# secrets
+.env
+
+node_modules/
+*.log
+.DS_Store

@@ -1,0 +1,107 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.2.0 (no leading v)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize and validate version
+        id: ver
+        run: |
+          v="${{ github.event.inputs.version }}"
+          case "$v" in
+            v*) v="${v#v}" ;;
+          esac
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
+            echo "invalid version: $v" >&2; exit 1;
+          }
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            echo "tag v$v already exists" >&2; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+      - name: Bump versions
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          sed -i.bak "s/^version = \".*\"/version = \"$v\"/" Cargo.toml && rm Cargo.toml.bak
+          sed -i.bak "s/\"version\": *\"[^\"]*\"/\"version\": \"$v\"/" .claude-plugin/plugin.json && rm .claude-plugin/plugin.json.bak
+          grep -q "\"version\": \"$v\"" .claude-plugin/plugin.json
+      - name: Commit and tag
+        run: |
+          git config user.name "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git add Cargo.toml .claude-plugin/plugin.json
+          git commit --allow-empty -m "release v${{ steps.ver.outputs.version }}"
+          git tag "${{ steps.ver.outputs.tag }}"
+          git push origin "HEAD:main" "${{ steps.ver.outputs.tag }}"
+
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Test
+        run: cargo test --target ${{ matrix.target }}
+      - name: Rename asset
+        run: |
+          cp "target/${{ matrix.target }}/release/semantic-compact" "semantic-compact-${{ matrix.target }}"
+          { shasum -a 256 "semantic-compact-${{ matrix.target }}" 2>/dev/null || sha256sum "semantic-compact-${{ matrix.target }}"; } >> "SHA256SUMS.part.${{ matrix.target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: semantic-compact-${{ matrix.target }}
+          path: |
+            semantic-compact-${{ matrix.target }}
+            SHA256SUMS.part.${{ matrix.target }}
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Merge checksums
+        working-directory: dist
+        run: cat SHA256SUMS.part.* > SHA256SUMS && rm SHA256SUMS.part.*
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.prepare.outputs.tag }}" dist/* \
+            --title "semantic-compact ${{ needs.prepare.outputs.version }}" \
+            --notes "Prebuilt binaries. The plugin Setup hook downloads the right one automatically; SHA256SUMS holds the checksums."
