@@ -69,18 +69,20 @@ fn finish(
             save_state(&ctx.data_dir, &State { sessions });
         }
     }
-    append_decision(
-        &ctx.data_dir,
-        &decision_entry(
-            input,
-            state_stats,
-            result,
-            decision,
-            skip_reason,
-            &ctx.config.thresholds,
-            suggested,
-        ),
-    );
+    if ctx.config.logging.decisions {
+        append_decision(
+            &ctx.data_dir,
+            &decision_entry(
+                input,
+                state_stats,
+                result,
+                decision,
+                skip_reason,
+                &ctx.config.thresholds,
+                suggested,
+            ),
+        );
+    }
     let reminder_text = match decision {
         "SUGGEST_COMPACT" => Some(ctx.config.reminder.message.clone()),
         "SUGGEST_CLEAR" => Some(ctx.config.reminder.clear_message.clone()),
@@ -274,7 +276,7 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
     }
 
     let task = build_task_state(&parsed, &prompt, &ctx.config.history);
-    if ctx.config.debug_logging {
+    if ctx.config.logging.debug {
         append_debug(
             &ctx.data_dir,
             serde_json::json!({
@@ -328,7 +330,7 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         record
     };
 
-    if ctx.config.debug_logging {
+    if ctx.config.logging.debug {
         append_debug(
             &ctx.data_dir,
             serde_json::json!({ "session_id": ctx.session_id, "judge": format!("{:?}", result), "decision": decision }),

@@ -12,7 +12,16 @@ pub struct Config {
     pub history: History,
     pub skip: Skip,
     pub reminder: Reminder,
-    pub debug_logging: bool,
+    pub logging: Logging,
+}
+
+// Both log files contain conversation-derived text, so they are strictly
+// opt-in: a fresh install writes nothing beyond the cooldown state.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Logging {
+    pub decisions: bool,
+    pub debug: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -203,7 +212,8 @@ pub const ENV_OVERRIDES: &[(&str, &str)] = &[
     ("SC_COOLDOWN_SECONDS", "cooldown.seconds"),
     ("SC_MAX_PROMPTS", "history.max_user_prompts"),
     ("SC_MIN_PRIOR_PROMPTS", "skip.min_prior_prompts"),
-    ("SC_DEBUG", "debug_logging"),
+    ("SC_LOG_DECISIONS", "logging.decisions"),
+    ("SC_DEBUG", "logging.debug"),
 ];
 
 // Endpoint/model presets per provider; "custom" leaves url/model to the
@@ -254,7 +264,7 @@ fn apply_env_overrides(
         let Some(raw) = env_getter(name).filter(|v| !v.is_empty()) else {
             continue;
         };
-        let leaf = if *name == "SC_DEBUG" {
+        let leaf = if matches!(*name, "SC_DEBUG" | "SC_LOG_DECISIONS") {
             Value::Bool(parse_bool(&raw))
         } else if let Ok(n) = raw.parse::<u64>() {
             Value::Number(n.into())

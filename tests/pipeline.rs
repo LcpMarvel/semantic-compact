@@ -71,7 +71,10 @@ fn run_pipeline(
 ) -> semantic_compact::pipeline::PipelineResult {
     // isolated plugin root so the repo's own .env / config.json never leak in
     let plugin_root = temp_dir("pluginroot");
-    let env = env_map(&[("JEV_API_KEY", "sk-test-key-123")]);
+    let env = env_map(&[
+        ("JEV_API_KEY", "sk-test-key-123"),
+        ("SC_LOG_DECISIONS", "1"),
+    ]);
     let opts = PipelineOpts {
         env_getter: &env,
         data_dir: Some(data_dir.to_path_buf()),
@@ -392,7 +395,7 @@ fn pipeline_skips_without_key_or_with_slash_or_empty_prompt() {
     assert_eq!(r2.skip_reason.as_deref(), Some("empty_prompt"));
 
     // no key anywhere: env map empty, isolated plugin root, no .env files
-    let env = env_map(&[]);
+    let env = env_map(&[("SC_LOG_DECISIONS", "1")]);
     let opts = PipelineOpts {
         env_getter: &env,
         data_dir: Some(data.clone()),
@@ -586,7 +589,11 @@ fn pipeline_remind_mode_keeps_old_behavior() {
     let cwd = temp_dir("remindcwd");
     let cfg_dir = cwd.join(".config").join("semantic-compact");
     std::fs::create_dir_all(&cfg_dir).unwrap();
-    std::fs::write(cfg_dir.join("config.json"), r#"{"reminder": {"mode": "remind"}}"#).unwrap();
+    std::fs::write(
+        cfg_dir.join("config.json"),
+        r#"{"reminder": {"mode": "remind"}}"#,
+    )
+    .unwrap();
     let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
     // HOME points at the config dir so user-layer config.json is found
     let home = cwd.to_string_lossy().into_owned();
@@ -623,6 +630,41 @@ fn pipeline_setup_notice_never_blocks() {
     assert_eq!(result.skip_reason.as_deref(), Some("no_api_key"));
     assert!(result.system_message.is_some());
     assert!(!result.block, "informational notices must never block");
+}
+
+#[test]
+fn decision_log_is_opt_in() {
+    let data = temp_dir("nolog");
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    // no SC_LOG_DECISIONS anywhere: nothing may be written
+    let env = env_map(&[("JEV_API_KEY", "sk-test-key")]);
+    let opts = PipelineOpts {
+        env_getter: &env,
+        data_dir: Some(data.clone()),
+        plugin_root: Some(temp_dir("pluginroot")),
+        post: &post,
+    };
+    let result = run(&stdin("全新任务", &fixture("oauth-session.jsonl")), &opts);
+    assert!(result.suggested);
+    assert!(
+        read_decisions(&data).is_empty(),
+        "no decision log without opt-in"
+    );
+    assert!(!data.join("logs").exists());
+
+    // opted in via env: the judgment lands
+    let env_on = env_map(&[("JEV_API_KEY", "sk-test-key"), ("SC_LOG_DECISIONS", "true")]);
+    let opts_on = PipelineOpts {
+        env_getter: &env_on,
+        data_dir: Some(data.clone()),
+        plugin_root: Some(temp_dir("pluginroot")),
+        post: &post,
+    };
+    let _ = run(
+        &stdin("全新任务2", &fixture("oauth-session.jsonl")),
+        &opts_on,
+    );
+    assert_eq!(read_decisions(&data).len(), 1);
 }
 
 #[test]

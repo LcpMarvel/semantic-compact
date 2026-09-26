@@ -82,6 +82,19 @@ Interpretation:
 Never print the key or the env file's contents at any point. To confirm the
 file exists, check its path only.
 
+## Step 4.5 — optional local judgment log
+
+Ask whether to enable the local decision log (default off). Present it
+exactly like this, without pushing either way:
+
+> 要不要开启本地判断日志?默认关闭。开启后每次判断会在本地写一行
+> JSONL(含 prompt 的 120 字符预览),用于复盘建议质量/校准阈值;
+> 不开启则除了冷却状态外不写任何文件。
+
+If yes, write `~/.config/semantic-compact/config.json` with
+`{"logging": {"decisions": true}}` merged into whatever the earlier steps
+wrote. If no, do nothing.
+
 ## Step 5 — summary
 
 Tell the user: which files were written where, that thresholds can be tuned

@@ -161,7 +161,7 @@ carries a one-time notice explaining how to configure it.
   },
   "skip": { "min_prior_prompts": 2 },
   "reminder": { "mode": "block", "message": "...", "clear_message": "..." },
-  "debug_logging": false
+  "logging": { "decisions": false, "debug": false }
 }
 ```
 
@@ -178,7 +178,7 @@ Environment overrides (highest priority): `SC_NEW_TASK_MIN`,
 `JEV_DECISIONS_URL`, `JEV_MODEL`,
 `JEV_AUTH_HEADER`, `JEV_AUTH_SCHEME`, `JEV_TIMEOUT_MS`,
 `SC_COOLDOWN_PROMPTS`, `SC_COOLDOWN_SECONDS`, `SC_MAX_PROMPTS`,
-`SC_MIN_PRIOR_PROMPTS`, `SC_DEBUG`. The provider also reads
+`SC_MIN_PRIOR_PROMPTS`, `SC_LOG_DECISIONS`, `SC_DEBUG`. The provider also reads
 `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER` (set by the plugin dialog); explicit
 `JEV_DECISIONS_URL` / `JEV_MODEL` always win over presets.
 
@@ -206,11 +206,18 @@ skipped without a call.
   texts, short assistant outcome summaries, touched file paths, and the new
   prompt. Never the full transcript, tool outputs, or file contents.
 - The API key is read at runtime, never logged, never committed.
-- Every judgment is appended to a local JSONL log:
-  `<data dir>/logs/decisions-YYYY-MM-DD.jsonl` — one line per judgment with
-  timestamp, session id, prompt hash + 120-char preview, the three
-  probabilities (all four), decision, thresholds, latency, cost, and error (if any).
-  `human_label` and `outcome` stay null until you fill them in by hand.
+- **Local logging is opt-in.** A fresh install writes nothing but the
+  cooldown state. If you want a judgment log (e.g. to review suggestions or
+  help calibrate thresholds), enable it:
+  `"logging": { "decisions": true }` in your config JSON, or
+  `SC_LOG_DECISIONS=1`. It then appends one JSONL line per judgment to
+  `<data dir>/logs/decisions-YYYY-MM-DD.jsonl` — timestamp, session id,
+  prompt hash + 120-char preview, the four probabilities, decision,
+  thresholds, latency, cost, error. `human_label` / `outcome` stay null
+  until you fill them in by hand.
+- `logging.debug` additionally records the raw task state and judge
+  responses (`debug-*.jsonl`); it records more prompt text — leave it off
+  unless you are debugging.
 - The data dir is `SC_DATA_DIR` → `CLAUDE_PLUGIN_DATA` (installed plugins)
   → `<plugin root>/data` (local dev). It is gitignored; nothing is uploaded.
 
@@ -221,8 +228,8 @@ The log doubles as a calibration dataset. To audit the plugin, edit the
 | `uncertain`), then look at precision first:
 
 ```sh
-jq -s '[.[] | select(.decision=="SUGGEST_COMPACT")] | length' data/logs/decisions-*.jsonl
-jq -s '[.[] | select(.human_label=="new_task")] | length' data/logs/decisions-*.jsonl
+jq -s '[.[] | select(.decision=="SUGGEST_COMPACT")] | length' ~/.claude/plugins/data/semantic-compact-*/logs/decisions-*.jsonl
+jq -s '[.[] | select(.human_label=="new_task")] | length' ~/.claude/plugins/data/semantic-compact-*/logs/decisions-*.jsonl
 ```
 
 False positives (suggested, you kept working) and false negatives (silent,
