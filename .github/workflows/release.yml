@@ -103,5 +103,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ needs.prepare.outputs.tag }}" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "semantic-compact ${{ needs.prepare.outputs.version }}" \
             --notes "Prebuilt binaries. The plugin Setup hook downloads the right one automatically; SHA256SUMS holds the checksums."
