@@ -247,6 +247,12 @@ Releases are cut from the Actions tab (`release` workflow): it bumps
 platform binaries, and attaches them plus `SHA256SUMS` to the GitHub
 release. The Setup hook installs from there.
 
+Installed users update by version: any change to plugin content (commands,
+hooks, manifest, binary) must ship as a release with a bumped version, then
+`claude plugin marketplace update semantic-compact && claude plugin update
+semantic-compact` picks it up. An unreleased push to `main` updates the
+marketplace clone but never the installed cache.
+
 ## Known constraints
 
 - Claude Code's transcript JSONL is an internal, undocumented format; the
