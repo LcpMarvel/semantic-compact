@@ -26,6 +26,7 @@ pub struct Thresholds {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct JevConfig {
+    pub provider: String,
     pub url: String,
     pub model: String,
     pub api_key: Option<String>,
@@ -80,8 +81,9 @@ impl Default for Thresholds {
 impl Default for JevConfig {
     fn default() -> Self {
         Self {
-            url: "https://openrouter.ai/api/alpha/decisions".to_string(),
-            model: "~typesafe/jev-latest".to_string(),
+            provider: "openrouter".to_string(),
+            url: String::new(),
+            model: String::new(),
             api_key: None,
             auth_header: "Authorization".to_string(),
             auth_scheme: "Bearer".to_string(),
@@ -135,7 +137,7 @@ impl Default for Reminder {
                             (suggestion only — nothing was cleared)"
                 .to_string(),
             setup_message: "Semantic Compact: no API key found — the plugin is inactive.\n\
-                            Set one via `claude plugin configure`, or:\n\
+                            Run /sc-setup to configure it (or `claude plugin configure`), or:\n\
                             mkdir -p ~/.config/semantic-compact && printf 'JEV_API_KEY=sk-or-...\\n' >> ~/.config/semantic-compact/env\n\
                             (this notice shows once per session)"
                 .to_string(),
@@ -185,6 +187,7 @@ pub const ENV_OVERRIDES: &[(&str, &str)] = &[
     ("SC_NEW_TASK_MIN", "thresholds.new_task_min"),
     ("SC_DEPENDS_MAX", "thresholds.depends_max"),
     ("SC_SHARED_CONTEXT_MIN", "thresholds.shared_context_min"),
+    ("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "jev.provider"),
     ("JEV_DECISIONS_URL", "jev.url"),
     ("JEV_MODEL", "jev.model"),
     ("JEV_AUTH_HEADER", "jev.auth_header"),
@@ -197,27 +200,51 @@ pub const ENV_OVERRIDES: &[(&str, &str)] = &[
     ("SC_DEBUG", "debug_logging"),
 ];
 
+// Endpoint/model presets per provider; "custom" leaves url/model to the
+// config layers. Both presets speak the same request/response schema, so
+// only url and model differ.
+fn apply_jev_presets(merged: &mut Value) {
+    let provider = merged
+        .pointer("/jev/provider")
+        .and_then(Value::as_str)
+        .unwrap_or("openrouter")
+        .trim()
+        .to_ascii_lowercase();
+    let (url, model) = match provider.as_str() {
+        "typesafe" | "official" | "jev" => ("https://api.typesafe.ai/v1/systemone", "jev-latest"),
+        "openrouter" => (
+            "https://openrouter.ai/api/alpha/decisions",
+            "~typesafe/jev-latest",
+        ),
+        _ => return,
+    };
+    let jev = merged
+        .pointer_mut("/jev")
+        .and_then(Value::as_object_mut)
+        .expect("jev object exists");
+    let unset = |v: Option<&Value>| match v {
+        Some(Value::String(s)) => s.trim().is_empty(),
+        Some(Value::Null) | None => true,
+        _ => false,
+    };
+    if unset(jev.get("url")) {
+        jev.insert("url".to_string(), Value::String(url.to_string()));
+    }
+    if unset(jev.get("model")) {
+        jev.insert("model".to_string(), Value::String(model.to_string()));
+    }
+}
+
 fn parse_bool(v: &str) -> bool {
     matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
-// Layers (low to high): built-in defaults, plugin config.json,
-// user config.json, then environment variables.
-pub fn load_config(plugin_root: &Path, env_getter: &dyn Fn(&str) -> Option<String>) -> Config {
-    let mut merged = serde_json::to_value(Config::default()).unwrap_or_else(|_| json!({}));
-
-    let user_dir = user_config_home(env_getter);
-    let layers = [
-        Some(plugin_root.join("config.json")),
-        user_dir.map(|d| d.join("config.json")),
-    ];
-    for layer in layers.into_iter().flatten() {
-        if let Some(over) = read_json_file(&layer) {
-            deep_merge(&mut merged, &over);
-        }
-    }
-
-    for (name, path) in ENV_OVERRIDES {
+fn apply_env_overrides(
+    merged: &mut Value,
+    env_getter: &dyn Fn(&str) -> Option<String>,
+    overrides: &[(&str, &str)],
+) {
+    for (name, path) in overrides {
         let Some(raw) = env_getter(name).filter(|v| !v.is_empty()) else {
             continue;
         };
@@ -238,8 +265,42 @@ pub fn load_config(plugin_root: &Path, env_getter: &dyn Fn(&str) -> Option<Strin
             m.insert(part.to_string(), cur);
             cur = Value::Object(m);
         }
-        deep_merge(&mut merged, &cur);
+        deep_merge(merged, &cur);
     }
+}
+
+// Layers (low to high): built-in defaults, plugin config.json,
+// user config.json, the provider env var, provider presets (fill empty
+// url/model), then the remaining environment variables.
+pub fn load_config(plugin_root: &Path, env_getter: &dyn Fn(&str) -> Option<String>) -> Config {
+    let mut merged = serde_json::to_value(Config::default()).unwrap_or_else(|_| json!({}));
+
+    let user_dir = user_config_home(env_getter);
+    let layers = [
+        Some(plugin_root.join("config.json")),
+        user_dir.map(|d| d.join("config.json")),
+    ];
+    for layer in layers.into_iter().flatten() {
+        if let Some(over) = read_json_file(&layer) {
+            deep_merge(&mut merged, &over);
+        }
+    }
+
+    apply_env_overrides(
+        &mut merged,
+        env_getter,
+        &[("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "jev.provider")],
+    );
+    apply_jev_presets(&mut merged);
+    apply_env_overrides(
+        &mut merged,
+        env_getter,
+        &ENV_OVERRIDES
+            .iter()
+            .copied()
+            .filter(|(n, _)| *n != "CLAUDE_PLUGIN_OPTION_JEV_PROVIDER")
+            .collect::<Vec<_>>(),
+    );
 
     serde_json::from_value(merged).unwrap_or_default()
 }

@@ -47,23 +47,32 @@ fn read_env_file(path: &Path) -> HashMap<String, String> {
 fn lookup(vars: &HashMap<String, String>) -> Option<&str> {
     vars.get("JEV_API_KEY")
         .or_else(|| vars.get("OPENROUTER_API_KEY"))
+        .or_else(|| vars.get("TYPESAFE_API_KEY"))
         .map(|s| s.as_str())
 }
 
-// Resolution order (high to low): process environment, the api_key field of
-// the JSON config, the user-level env file (~/.config/semantic-compact/env),
-// the project .env next to the user's cwd, and finally an .env inside the
-// plugin directory. The key itself is never logged or persisted.
+// Resolution order (high to low): the plugin option set via /plugin
+// configure (sensitive value from secure storage), other process
+// environment variables, the api_key field of the JSON config, the
+// user-level env file (~/.config/semantic-compact/env), the project .env
+// next to the user's cwd, and finally an .env inside the plugin directory.
+// The key itself is never logged or persisted.
 pub fn resolve_api_key(
     env_getter: &dyn Fn(&str) -> Option<String>,
     json_key: Option<&str>,
     cwd: Option<&Path>,
     plugin_root: &Path,
 ) -> Option<String> {
+    if let Some(k) = env_getter("CLAUDE_PLUGIN_OPTION_JEV_API_KEY").filter(|v| !v.is_empty()) {
+        return Some(k);
+    }
     if let Some(k) = env_getter("JEV_API_KEY").filter(|v| !v.is_empty()) {
         return Some(k);
     }
     if let Some(k) = env_getter("OPENROUTER_API_KEY").filter(|v| !v.is_empty()) {
+        return Some(k);
+    }
+    if let Some(k) = env_getter("TYPESAFE_API_KEY").filter(|v| !v.is_empty()) {
         return Some(k);
     }
     if let Some(k) = json_key.filter(|v| !v.is_empty()) {

@@ -518,6 +518,65 @@ fn pipeline_setup_notice_shows_once_per_session() {
 }
 
 #[test]
+fn jev_provider_presets() {
+    let dir = temp_dir("presets");
+
+    // default provider is openrouter and fills url/model
+    let env = env_map(&[]);
+    let cfg = load_config(&dir, &env);
+    assert_eq!(cfg.jev.provider, "openrouter");
+    assert_eq!(cfg.jev.url, "https://openrouter.ai/api/alpha/decisions");
+    assert_eq!(cfg.jev.model, "~typesafe/jev-latest");
+
+    // provider from the plugin option env var switches the preset
+    let env = env_map(&[("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "typesafe")]);
+    let cfg = load_config(&dir, &env);
+    assert_eq!(cfg.jev.url, "https://api.typesafe.ai/v1/systemone");
+    assert_eq!(cfg.jev.model, "jev-latest");
+
+    // explicit url/model from a config layer survive the preset
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"jev": {"url": "https://gw.example/decisions", "model": "other"}}"#,
+    )
+    .unwrap();
+    let cfg = load_config(&dir, &env_map(&[]));
+    assert_eq!(cfg.jev.url, "https://gw.example/decisions");
+    assert_eq!(cfg.jev.model, "other");
+
+    // a plain env var still beats the preset
+    let env = env_map(&[("JEV_DECISIONS_URL", "https://env.example/d")]);
+    let cfg = load_config(&dir, &env);
+    assert_eq!(cfg.jev.url, "https://env.example/d");
+
+    // custom provider with nothing configured leaves the url empty
+    let empty = temp_dir("presets-empty");
+    let cfg = load_config(
+        &empty,
+        &env_map(&[("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "custom")]),
+    );
+    assert!(cfg.jev.url.is_empty());
+}
+
+#[test]
+fn pipeline_skips_custom_provider_without_url() {
+    let data = temp_dir("nourl");
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    let env = env_map(&[
+        ("JEV_API_KEY", "sk-test"),
+        ("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "custom"),
+    ]);
+    let opts = PipelineOpts {
+        env_getter: &env,
+        data_dir: Some(data.clone()),
+        plugin_root: Some(temp_dir("pluginroot")),
+        post: &post,
+    };
+    let result = run(&stdin("随便什么", &fixture("oauth-session.jsonl")), &opts);
+    assert_eq!(result.skip_reason.as_deref(), Some("no_api_url"));
+}
+
+#[test]
 fn pipeline_session_record_roundtrips_through_state_file() {
     let data = temp_dir("statefile");
     let state = semantic_compact::decision::load_state(&data);

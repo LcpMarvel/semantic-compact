@@ -186,6 +186,21 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         return result;
     };
 
+    // A custom provider with nothing configured cannot reach any endpoint.
+    if ctx.config.jev.url.trim().is_empty() {
+        return finish(
+            &ctx,
+            input,
+            Some("no_api_url"),
+            None,
+            None,
+            "SILENT",
+            false,
+            None,
+            None,
+        );
+    }
+
     // Count this turn for the session before anything expensive.
     let state = load_state(&ctx.data_dir);
     let (record, suppressed) = bump_and_check(

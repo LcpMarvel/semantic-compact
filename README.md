@@ -55,10 +55,13 @@ claude plugin marketplace add LcpMarvel/semantic-compact
 claude plugin install semantic-compact@semantic-compact
 ```
 
-That is all: the Setup hook downloads a prebuilt static binary for your
-platform (macOS arm64/x64, Linux amd64/arm64), verifies its checksum, and
-future updates (`claude plugin update semantic-compact`) re-provision it.
-Restart Claude Code (or start a new session) after installing.
+Installing through `/plugin` inside a session also opens the configuration
+dialog right away (provider + API key — see "Provider & API key" below).
+No binary to install by hand: on the first prompt after install the plugin
+provisions itself with a prebuilt static binary for your platform (macOS
+arm64/x64, Linux amd64/arm64), checksum-verified from the matching GitHub
+release, and `claude plugin update semantic-compact` re-provisions on
+upgrades. Restart Claude Code (or start a new session) after installing.
 
 Uninstall: `claude plugin uninstall semantic-compact` and optionally
 `claude plugin marketplace remove semantic-compact`.
@@ -83,25 +86,43 @@ defaults. Layers, lowest to highest:
    (`$XDG_CONFIG_HOME/semantic-compact/config.json` if set)
 4. environment variables — highest priority
 
-### API key
+### Provider & API key
 
-The judge needs an OpenRouter API key (or a compatible Decisions endpoint —
-see `jev.url`). Resolution order:
+Judgments are served over the Jev Decisions API. Pick a provider; only the
+API key is required, everything else has a preset:
 
-1. `JEV_API_KEY` (or `OPENROUTER_API_KEY`) in the environment
-2. `"jev": { "api_key": "..." }` in a config JSON layer
-3. `~/.config/semantic-compact/env` (KEY=VALUE lines)
-4. `<project>/.env` next to where Claude Code runs
-5. `<plugin root>/.env`
+| provider | endpoint | model | key from |
+|---|---|---|---|
+| `openrouter` (default) | `openrouter.ai/api/alpha/decisions` | `~typesafe/jev-latest` | openrouter.ai/keys |
+| `typesafe` | `api.typesafe.ai/v1/systemone` | `jev-latest` | console.typesafe.ai/keys |
+| `custom` | you set `jev.url` / `jev.model` | yours | yours |
 
-Quick start:
+Four ways to configure, pick whichever you like:
 
-```sh
-mkdir -p ~/.config/semantic-compact
-printf 'JEV_API_KEY=sk-or-...' >> ~/.config/semantic-compact/env
-```
+1. **Install-time dialog** — installing via `/plugin` inside a session opens
+   the plugin's configuration dialog automatically: choose `JEV_PROVIDER`,
+   paste `JEV_API_KEY` (masked input; stored in the OS keychain, not
+   settings.json).
+2. **`/plugin configure semantic-compact`** — the same dialog, any time.
+   CLI equivalent at install:
+   `claude plugin install semantic-compact@semantic-compact --config JEV_PROVIDER=typesafe --config JEV_API_KEY=...`
+3. **`/sc-setup`** — the wizard command shipped with this plugin: walks
+   through provider choice, asks only for the key on presets, walks every
+   field one by one (or writes a template) for fully custom setups, then
+   runs a live verification.
+4. **Files / environment** — power-user path, see below.
 
-Without a key the plugin is inert — every prompt is skipped silently.
+Key resolution order (high to low):
+
+1. `CLAUDE_PLUGIN_OPTION_JEV_API_KEY` — the dialog/`--config` value
+2. `JEV_API_KEY`, `OPENROUTER_API_KEY`, or `TYPESAFE_API_KEY` in the environment
+3. `"jev": { "api_key": "..." }` in a config JSON layer
+4. `~/.config/semantic-compact/env` (KEY=VALUE lines)
+5. `<project>/.env` next to where Claude Code runs
+6. `<plugin root>/.env`
+
+Without a key the plugin stays inert, and the first prompt of a session
+carries a one-time notice explaining how to configure it.
 
 ### Full option reference
 
@@ -109,8 +130,9 @@ Without a key the plugin is inert — every prompt is skipped silently.
 {
   "thresholds": { "new_task_min": 0.9, "depends_max": 0.2, "shared_context_min": 0.5 },
   "jev": {
-    "url": "https://openrouter.ai/api/alpha/decisions",
-    "model": "~typesafe/jev-latest",
+    "provider": "openrouter",
+    "url": "(filled from the provider preset)",
+    "model": "(filled from the provider preset)",
     "api_key": null,
     "auth_header": "Authorization",
     "auth_scheme": "Bearer",
@@ -136,7 +158,9 @@ Environment overrides (highest priority): `SC_NEW_TASK_MIN`,
 `SC_DEPENDS_MAX`, `SC_SHARED_CONTEXT_MIN`, `JEV_DECISIONS_URL`, `JEV_MODEL`,
 `JEV_AUTH_HEADER`, `JEV_AUTH_SCHEME`, `JEV_TIMEOUT_MS`,
 `SC_COOLDOWN_PROMPTS`, `SC_COOLDOWN_SECONDS`, `SC_MAX_PROMPTS`,
-`SC_MIN_PRIOR_PROMPTS`, `SC_DEBUG`.
+`SC_MIN_PRIOR_PROMPTS`, `SC_DEBUG`. The provider also reads
+`CLAUDE_PLUGIN_OPTION_JEV_PROVIDER` (set by the plugin dialog); explicit
+`JEV_DECISIONS_URL` / `JEV_MODEL` always win over presets.
 
 Notes:
 

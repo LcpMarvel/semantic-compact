@@ -2,9 +2,22 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "semantic-compact",
   "version": "0.1.0",
-  "description": "Suggests running /compact when a new task begins: task-boundary detection on every prompt, reminder only — never auto-compacts.",
+  "description": "Suggests running /compact or /clear when a new task begins: task-boundary detection on every prompt, reminder only — never auto-compacts.",
   "author": {
     "name": "LcpMarvel"
   },
-  "keywords": ["compact", "context", "task-boundary", "hooks"]
+  "keywords": ["compact", "clear", "context", "task-boundary", "hooks"],
+  "userConfig": {
+    "JEV_PROVIDER": {
+      "type": "string",
+      "title": "Jev provider",
+      "description": "Where judgments are served: openrouter (default), typesafe (direct, key from console.typesafe.ai), or custom (set jev.url / jev.model in ~/.config/semantic-compact/config.json)"
+    },
+    "JEV_API_KEY": {
+      "type": "string",
+      "title": "API key",
+      "description": "API key for the chosen provider. Stored in secure storage, never in settings.json.",
+      "sensitive": true
+    }
+  }
 }
