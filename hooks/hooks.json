@@ -17,8 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/semantic-compact",
-            "args": [],
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/on-prompt.sh"],
             "timeout": 30
           }
         ]

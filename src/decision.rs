@@ -14,6 +14,7 @@ pub struct SessionRecord {
     pub last_suggest_ts: Option<u64>,
     pub prompts_since_suggest: u64,
     pub last_seen: u64,
+    pub setup_notice_ts: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

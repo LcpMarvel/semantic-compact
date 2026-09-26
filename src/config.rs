@@ -64,6 +64,7 @@ pub struct Skip {
 pub struct Reminder {
     pub message: String,
     pub clear_message: String,
+    pub setup_message: String,
 }
 
 impl Default for Thresholds {
@@ -132,6 +133,11 @@ impl Default for Reminder {
                             The previous context is unlikely to be useful for it.\n\
                             Consider /clear for a fresh start, or /compact to keep a summary. \
                             (suggestion only — nothing was cleared)"
+                .to_string(),
+            setup_message: "Semantic Compact: no API key found — the plugin is inactive.\n\
+                            Set one via `claude plugin configure`, or:\n\
+                            mkdir -p ~/.config/semantic-compact && printf 'JEV_API_KEY=sk-or-...\\n' >> ~/.config/semantic-compact/env\n\
+                            (this notice shows once per session)"
                 .to_string(),
         }
     }

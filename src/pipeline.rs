@@ -151,8 +151,25 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         cwd.as_deref(),
         &plugin_root,
     );
+    let now = now_ms();
     let Some(api_key) = api_key else {
-        return finish(
+        // Inactive plugin: on the first keyless prompt of a session, show
+        // how to configure the key, then stay quiet for the rest of it.
+        let mut state = load_state(&ctx.data_dir);
+        let notice = if ctx.session_id != "unknown" {
+            let entry = state.sessions.entry(ctx.session_id.clone()).or_default();
+            if entry.setup_notice_ts.is_none() {
+                entry.setup_notice_ts = Some(now);
+                entry.last_seen = now;
+                save_state(&ctx.data_dir, &state);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        let mut result = finish(
             &ctx,
             input,
             Some("no_api_key"),
@@ -163,11 +180,14 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             None,
             None,
         );
+        if notice {
+            result.system_message = Some(ctx.config.reminder.setup_message.clone());
+        }
+        return result;
     };
 
     // Count this turn for the session before anything expensive.
     let state = load_state(&ctx.data_dir);
-    let now = now_ms();
     let (record, suppressed) = bump_and_check(
         state.sessions.get(&ctx.session_id),
         now,

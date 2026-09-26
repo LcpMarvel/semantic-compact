@@ -399,6 +399,12 @@ fn pipeline_skips_without_key_or_with_slash_or_empty_prompt() {
     };
     let r3 = run(&stdin("随便什么", &transcript), &opts);
     assert_eq!(r3.skip_reason.as_deref(), Some("no_api_key"));
+    // first keyless prompt of a session carries the setup notice
+    let notice = r3
+        .system_message
+        .expect("setup notice on first keyless prompt");
+    assert!(notice.contains("no API key"));
+    assert!(notice.contains("~/.config/semantic-compact"));
 
     let entries = read_decisions(&data);
     assert!(entries.iter().any(|e| e["skip_reason"] == "no_api_key"));
@@ -492,6 +498,26 @@ fn pipeline_suggests_clear_for_unrelated_task() {
 }
 
 #[test]
+fn pipeline_setup_notice_shows_once_per_session() {
+    let data = temp_dir("notice");
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    let env = env_map(&[]);
+    let transcript = fixture("oauth-session.jsonl");
+
+    let opts = PipelineOpts {
+        env_getter: &env,
+        data_dir: Some(data.clone()),
+        plugin_root: Some(temp_dir("pluginroot")),
+        post: &post,
+    };
+    let first = run(&stdin("随便什么", &transcript), &opts);
+    assert!(first.system_message.is_some());
+    let second = run(&stdin("再来一句", &transcript), &opts);
+    assert!(second.system_message.is_none());
+    assert_eq!(second.skip_reason.as_deref(), Some("no_api_key"));
+}
+
+#[test]
 fn pipeline_session_record_roundtrips_through_state_file() {
     let data = temp_dir("statefile");
     let state = semantic_compact::decision::load_state(&data);
@@ -504,6 +530,7 @@ fn pipeline_session_record_roundtrips_through_state_file() {
             last_suggest_ts: Some(42),
             prompts_since_suggest: 0,
             last_seen: now,
+            setup_notice_ts: None,
         },
     );
     semantic_compact::decision::save_state(&data, &semantic_compact::decision::State { sessions });
