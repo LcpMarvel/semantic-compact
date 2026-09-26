@@ -16,6 +16,14 @@ suggestion.
 
 > Compact when the task changes — not merely when the context is full.
 
+**Why it pays for itself:** every turn re-sends the whole conversation to
+the model, and cache reuse only covers what the previous turn started
+with. Stale context from a finished task is dead weight you pay for again
+on every single turn — and the moment to shed it is *before* the new task
+runs, not after you notice the bill. A judgment costs ~$0.00003; a single
+uncached re-send of a 120K-token context costs ~$0.60. Missing the switch
+once is 20,000× the price of watching for it.
+
 **It never compacts or clears anything by itself, never rewrites your
 prompt, and every failure path degrades to silence.**
 
