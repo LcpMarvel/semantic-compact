@@ -228,19 +228,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         now,
         &ctx.config.cooldown,
     );
-    if suppressed {
-        return finish(
-            &ctx,
-            input,
-            Some("cooldown"),
-            None,
-            None,
-            "SILENT",
-            false,
-            Some(&record),
-            Some(&state),
-        );
-    }
 
     let parsed = match input
         .get("transcript_path")
@@ -288,11 +275,36 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         );
     }
     if task.prior_prompt_count < ctx.config.skip.min_prior_prompts {
+        // History only ever grows, so an armed session suddenly dropping
+        // below the floor means the user cleared the conversation — usually
+        // by acting on our suggestion. The cooldown has served its purpose.
+        let record = if record.last_suggest_ts.is_some() {
+            SessionRecord {
+                last_suggest_ts: None,
+                ..record
+            }
+        } else {
+            record
+        };
         return finish(
             &ctx,
             input,
             Some("insufficient_history"),
             Some(&task.stats),
+            None,
+            "SILENT",
+            false,
+            Some(&record),
+            Some(&state),
+        );
+    }
+
+    if suppressed {
+        return finish(
+            &ctx,
+            input,
+            Some("cooldown"),
+            None,
             None,
             "SILENT",
             false,

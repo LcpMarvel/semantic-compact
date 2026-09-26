@@ -188,7 +188,9 @@ Notes:
   (e.g. `x-api-key` with no scheme) work without code changes.
 - `cooldown`: after one suggestion, further suggestions for that session are
   suppressed until **both** N prompts have passed **and** M seconds have
-  elapsed — one reminder per task switch, not a nag.
+  elapsed — one reminder per task switch, not a nag. Clearing the
+  conversation (history suddenly below the floor) rearms it immediately:
+  acting on the suggestion means it has done its job.
 - `skip.min_prior_prompts`: sessions younger than this many real prompts are
   not judged (nothing worth compacting yet, saves latency and cost).
 - `debug_logging` writes extra detail (raw task state, judge response) to

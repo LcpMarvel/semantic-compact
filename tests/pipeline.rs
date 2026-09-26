@@ -668,6 +668,31 @@ fn decision_log_is_opt_in() {
 }
 
 #[test]
+fn clearing_the_conversation_rearms_the_cooldown() {
+    let data = temp_dir("clearreset");
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    let full = fixture("oauth-session.jsonl");
+    let fresh = fixture("fresh-session.jsonl"); // 1 prior prompt
+
+    // a suggestion arms the cooldown
+    let r1 = run_pipeline(&stdin("全新任务", &full), &data, &post);
+    assert!(r1.suggested);
+
+    // a prompt on a wiped conversation (fewer priors than the floor) must
+    // disarm the cooldown instead of skipping with `cooldown`
+    let r2 = run_pipeline(&stdin("清空后的新任务", &fresh), &data, &post);
+    assert_eq!(r2.skip_reason.as_deref(), Some("insufficient_history"));
+    assert!(!r2.block);
+
+    // the very next switch can therefore suggest again
+    let r3 = run_pipeline(&stdin("又一个全新任务", &full), &data, &post);
+    assert!(
+        r3.suggested,
+        "cooldown must not survive a conversation clear"
+    );
+}
+
+#[test]
 fn pipeline_session_record_roundtrips_through_state_file() {
     let data = temp_dir("statefile");
     let state = semantic_compact::decision::load_state(&data);
