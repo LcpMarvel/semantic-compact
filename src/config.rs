@@ -81,8 +81,8 @@ pub struct Reminder {
 impl Default for Thresholds {
     fn default() -> Self {
         Self {
-            new_task_min: 0.80,
-            depends_max: 0.20,
+            new_task_min: 0.85,
+            depends_max: 0.30,
             shared_context_min: 0.50,
         }
     }
@@ -128,7 +128,7 @@ impl Default for History {
 impl Default for Skip {
     fn default() -> Self {
         Self {
-            min_prior_prompts: 2,
+            min_prior_prompts: 1,
         }
     }
 }

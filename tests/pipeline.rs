@@ -275,7 +275,7 @@ fn config_layers_and_env_override() {
     let cfg = load_config(&dir, &env);
     assert!((cfg.thresholds.depends_max - 0.3).abs() < 1e-9);
     assert_eq!(cfg.jev.model, "custom/model");
-    assert!((cfg.thresholds.new_task_min - 0.80).abs() < 1e-9); // untouched default
+    assert!((cfg.thresholds.new_task_min - 0.85).abs() < 1e-9); // untouched default
 
     let env2 = env_map(&[("SC_NEW_TASK_MIN", "0.95")]);
     let cfg2 = load_config(&dir, &env2);
@@ -421,12 +421,31 @@ fn pipeline_skips_when_history_insufficient() {
     let data = temp_dir("fresh");
     let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
     let result = run_pipeline(
-        &stdin("再帮我做点别的", &fixture("fresh-session.jsonl")),
+        &stdin("再帮我做点别的", &fixture("noise-only.jsonl")),
         &data,
         &post,
     );
     assert_eq!(result.skip_reason.as_deref(), Some("insufficient_history"));
     assert!(!result.suggested);
+}
+
+// One prior exchange is enough to spot a full topic switch: the second
+// prompt of a fresh session gets judged, not swallowed by the warmup.
+#[test]
+fn pipeline_judges_second_prompt_of_fresh_session() {
+    let data = temp_dir("second");
+    let post = |_req: &HttpRequest| Ok(decision_response(0.93, 0.04, 0.9, 0.05));
+    let result = run_pipeline(
+        &stdin(
+            "我想换个新手机,现在的iphone值得买吗?",
+            &fixture("chat-session.jsonl"),
+        ),
+        &data,
+        &post,
+    );
+    assert_ne!(result.skip_reason.as_deref(), Some("insufficient_history"));
+    assert!(result.suggested);
+    assert_eq!(result.decision, "SUGGEST_CLEAR");
 }
 
 #[test]
@@ -672,7 +691,7 @@ fn clearing_the_conversation_rearms_the_cooldown() {
     let data = temp_dir("clearreset");
     let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
     let full = fixture("oauth-session.jsonl");
-    let fresh = fixture("fresh-session.jsonl"); // 1 prior prompt
+    let fresh = fixture("noise-only.jsonl"); // wiped conversation: no real prompts
 
     // a suggestion arms the cooldown
     let r1 = run_pipeline(&stdin("全新任务", &full), &data, &post);

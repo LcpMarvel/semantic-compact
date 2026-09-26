@@ -139,7 +139,7 @@ carries a one-time notice explaining how to configure it.
 
 ```jsonc
 {
-  "thresholds": { "new_task_min": 0.8, "depends_max": 0.2, "shared_context_min": 0.5 },
+  "thresholds": { "new_task_min": 0.85, "depends_max": 0.3, "shared_context_min": 0.5 },
   "jev": {
     "provider": "openrouter",
     "url": "(filled from the provider preset)",

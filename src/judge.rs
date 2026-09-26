@@ -9,10 +9,10 @@ pub fn questions() -> Value {
     json!({
         "new_task": {
             "type": "noul",
-            "instructions": "Does the newest user prompt begin a materially different coding task from what the user has been working on, such that the previous task context (debug logs, tool results, explored files) would likely no longer be needed?",
+            "instructions": "Does the newest user prompt begin a materially different task or topic from what the user has been working on or discussing, such that the previous context (debug logs, tool results, explored files, earlier answers) would likely no longer be needed?",
             "criteria": {
-                "true": "The prompt starts a new self-contained task with a different goal. Cross-layer shifts that still serve the same user goal (e.g. backend fix then frontend button for the same feature) are NOT a new task. Short follow-ups, references to earlier work (continue / fix that / add tests for it), questions about past work, and brief tangents are NOT a new task.",
-                "false": "The prompt continues, refines, debugs, extends, or asks about the current task, or depends on prior context."
+                "true": "The prompt starts a new self-contained task, or — in a general conversation — a wholly different subject, with a different goal. In casual chat a new unrelated question (food, another product, a schedule, a different life question) IS a new topic. Cross-layer shifts that still serve the same user goal (e.g. backend fix then frontend button for the same feature) are NOT a new task. Short follow-ups, references to earlier work (continue / fix that / add tests for it / what about X), questions about the current subject, and quick side questions during hands-on work are NOT a new task.",
+                "false": "The prompt continues, refines, debugs, extends, or asks about the current task or subject, or depends on prior context."
             }
         },
         "depends_on_previous_context": {

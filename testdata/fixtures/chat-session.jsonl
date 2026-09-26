@@ -1,0 +1,3 @@
+{"type":"mode"}
+{"type":"user","isSidechain":false,"timestamp":"2026-09-26T12:00:01.000Z","uuid":"c1","parentUuid":null,"message":{"role":"user","content":"一般游泳50米要花多少时间?"}}
+{"type":"assistant","isSidechain":false,"timestamp":"2026-09-26T12:00:30.000Z","uuid":"c2","parentUuid":"c1","message":{"role":"assistant","content":[{"type":"text","text":"业余泳者 50 米自由泳一般 40~60 秒,初学者 1 分钟以上,竞技选手 25 秒左右。"}],"usage":{}}}
