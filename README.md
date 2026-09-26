@@ -99,18 +99,25 @@ API key is required, everything else has a preset:
 
 Four ways to configure, pick whichever you like:
 
-1. **Install-time dialog** — installing via `/plugin` inside a session opens
+1. **`/sc-setup`** (most reliable) — the wizard command shipped with this
+   plugin: walks through provider choice, asks only for the key on presets,
+   walks every field one by one (or writes a template) for fully custom
+   setups, then runs a live verification.
+2. **Install-time dialog** — installing via `/plugin` inside a session opens
    the plugin's configuration dialog automatically: choose `JEV_PROVIDER`,
    paste `JEV_API_KEY` (masked input; stored in the OS keychain, not
    settings.json).
-2. **`/plugin configure semantic-compact`** — the same dialog, any time.
+3. **`/plugin configure semantic-compact`** — the same dialog, any time.
    CLI equivalent at install:
    `claude plugin install semantic-compact@semantic-compact --config JEV_PROVIDER=typesafe --config JEV_API_KEY=...`
-3. **`/sc-setup`** — the wizard command shipped with this plugin: walks
-   through provider choice, asks only for the key on presets, walks every
-   field one by one (or writes a template) for fully custom setups, then
-   runs a live verification.
 4. **Files / environment** — power-user path, see below.
+
+> Version note: on some Claude Code builds (verified on 2.1.283) the
+> dialog/`--config` values are stored correctly but the
+> `CLAUDE_PLUGIN_OPTION_*` variables are not exported to hook processes, so
+> the plugin never sees them. If the one-time setup notice keeps appearing
+> after configuring through the dialog, use `/sc-setup` or the file/env
+> path instead — they work everywhere.
 
 Key resolution order (high to low):
 
