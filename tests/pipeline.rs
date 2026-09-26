@@ -275,7 +275,7 @@ fn config_layers_and_env_override() {
     let cfg = load_config(&dir, &env);
     assert!((cfg.thresholds.depends_max - 0.3).abs() < 1e-9);
     assert_eq!(cfg.jev.model, "custom/model");
-    assert!((cfg.thresholds.new_task_min - 0.90).abs() < 1e-9); // untouched default
+    assert!((cfg.thresholds.new_task_min - 0.80).abs() < 1e-9); // untouched default
 
     let env2 = env_map(&[("SC_NEW_TASK_MIN", "0.95")]);
     let cfg2 = load_config(&dir, &env2);

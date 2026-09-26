@@ -81,7 +81,7 @@ pub struct Reminder {
 impl Default for Thresholds {
     fn default() -> Self {
         Self {
-            new_task_min: 0.90,
+            new_task_min: 0.80,
             depends_max: 0.20,
             shared_context_min: 0.50,
         }
