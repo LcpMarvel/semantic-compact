@@ -315,10 +315,12 @@ fn pipeline_suggests_on_clear_task_switch() {
 
     assert!(result.suggested);
     assert_eq!(result.decision, "SUGGEST_COMPACT");
+    assert!(result.block, "default reminder mode blocks the prompt");
     let msg = result.system_message.expect("reminder present");
     assert!(msg.contains("Semantic Compact"));
     assert!(msg.contains("/compact"));
     assert!(msg.contains("nothing was compacted"));
+    assert!(msg.contains("re-send"));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
     let entries = read_decisions(&data);
@@ -487,10 +489,12 @@ fn pipeline_suggests_clear_for_unrelated_task() {
 
     assert!(result.suggested);
     assert_eq!(result.decision, "SUGGEST_CLEAR");
+    assert!(result.block);
     let msg = result.system_message.expect("clear reminder present");
     assert!(msg.contains("/clear"));
     assert!(msg.contains("/compact"));
     assert!(msg.contains("nothing was cleared"));
+    assert!(msg.contains("re-send"));
 
     let entries = read_decisions(&data);
     assert_eq!(entries[0]["decision"], "SUGGEST_CLEAR");
@@ -574,6 +578,51 @@ fn pipeline_skips_custom_provider_without_url() {
     };
     let result = run(&stdin("随便什么", &fixture("oauth-session.jsonl")), &opts);
     assert_eq!(result.skip_reason.as_deref(), Some("no_api_url"));
+}
+
+#[test]
+fn pipeline_remind_mode_keeps_old_behavior() {
+    let data = temp_dir("remind");
+    let cwd = temp_dir("remindcwd");
+    let cfg_dir = cwd.join(".config").join("semantic-compact");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(cfg_dir.join("config.json"), r#"{"reminder": {"mode": "remind"}}"#).unwrap();
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    // HOME points at the config dir so user-layer config.json is found
+    let home = cwd.to_string_lossy().into_owned();
+    let pairs = [("JEV_API_KEY", "sk-test"), ("HOME", home.as_str())];
+    let env = env_map(&pairs);
+    let opts = PipelineOpts {
+        env_getter: &env,
+        data_dir: Some(data.clone()),
+        plugin_root: Some(temp_dir("pluginroot")),
+        post: &post,
+    };
+    let result = run(
+        &stdin("全新无关任务", &fixture("oauth-session.jsonl")),
+        &opts,
+    );
+    assert!(result.suggested);
+    assert!(!result.block);
+    let msg = result.system_message.unwrap();
+    assert!(!msg.contains("re-send"));
+}
+
+#[test]
+fn pipeline_setup_notice_never_blocks() {
+    let data = temp_dir("noticeblock");
+    let env = env_map(&[]);
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    let opts = PipelineOpts {
+        env_getter: &env,
+        data_dir: Some(data.clone()),
+        plugin_root: Some(temp_dir("pluginroot")),
+        post: &post,
+    };
+    let result = run(&stdin("随便什么", &fixture("oauth-session.jsonl")), &opts);
+    assert_eq!(result.skip_reason.as_deref(), Some("no_api_key"));
+    assert!(result.system_message.is_some());
+    assert!(!result.block, "informational notices must never block");
 }
 
 #[test]

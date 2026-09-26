@@ -34,7 +34,15 @@ fn main() {
     let result = pipeline::run(&input, &opts);
 
     if let Some(message) = result.system_message {
-        if let Ok(json) = serde_json::to_string(&serde_json::json!({ "systemMessage": message })) {
+        // Block mode returns the prompt to the user (reason shown, prompt
+        // not processed); remind mode shows a warning while it proceeds.
+        // Every failure path reaches here with neither set.
+        let payload = if result.block {
+            serde_json::json!({ "decision": "block", "reason": message, "suppressOriginalPrompt": true })
+        } else {
+            serde_json::json!({ "systemMessage": message })
+        };
+        if let Ok(json) = serde_json::to_string(&payload) {
             let stdout = std::io::stdout();
             let mut lock = stdout.lock();
             let _ = lock.write_all(json.as_bytes());

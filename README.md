@@ -27,7 +27,11 @@ UserPromptSubmit hook
        same task / depends on history      → silence
        new task, shares project context    → suggest /compact (a summary still helps)
        new task, essentially unrelated     → suggest /clear (even a summary is dead weight)
-  → suggestion renders as a systemMessage warning; otherwise: silence
+  → suggestion comes back BEFORE the prompt runs:
+       block mode (default) returns the prompt to you with the reason —
+       run /clear or /compact, then re-send it (↑ + Enter); re-sending
+       as-is just continues with the current context
+       remind mode only shows a warning while the prompt proceeds
 ```
 
 The compact-vs-clear split exists because `/compact` itself costs a
@@ -156,13 +160,22 @@ carries a one-time notice explaining how to configure it.
     "state_char_limit": 10000
   },
   "skip": { "min_prior_prompts": 2 },
-  "reminder": { "message": "...", "clear_message": "..." },
+  "reminder": { "mode": "block", "message": "...", "clear_message": "..." },
   "debug_logging": false
 }
 ```
 
+- `reminder.mode` — `"block"` (default) or `"remind"`. A warning that
+  appears while the model is already running is hard to act on, so by
+  default a suggestion **returns the prompt to you** before it is
+  processed: the reason is shown, the prompt is not lost — run `/clear` or
+  `/compact`, then re-send it (↑ + Enter); re-sending as-is simply
+  continues with the current context. Nothing is ever cleared or compacted
+  automatically, and every failure path stays silent rather than blocking.
+  Set `"remind"` for the non-intrusive warning-only behavior.
 Environment overrides (highest priority): `SC_NEW_TASK_MIN`,
-`SC_DEPENDS_MAX`, `SC_SHARED_CONTEXT_MIN`, `JEV_DECISIONS_URL`, `JEV_MODEL`,
+`SC_DEPENDS_MAX`, `SC_SHARED_CONTEXT_MIN`, `SC_REMINDER_MODE`,
+`JEV_DECISIONS_URL`, `JEV_MODEL`,
 `JEV_AUTH_HEADER`, `JEV_AUTH_SCHEME`, `JEV_TIMEOUT_MS`,
 `SC_COOLDOWN_PROMPTS`, `SC_COOLDOWN_SECONDS`, `SC_MAX_PROMPTS`,
 `SC_MIN_PRIOR_PROMPTS`, `SC_DEBUG`. The provider also reads

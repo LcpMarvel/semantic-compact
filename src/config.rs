@@ -63,6 +63,7 @@ pub struct Skip {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Reminder {
+    pub mode: String,
     pub message: String,
     pub clear_message: String,
     pub setup_message: String,
@@ -126,6 +127,10 @@ impl Default for Skip {
 impl Default for Reminder {
     fn default() -> Self {
         Self {
+            // "block" bounces the prompt back so the user decides about
+            // /clear or /compact BEFORE the old context is consumed;
+            // "remind" only shows a warning while the prompt proceeds.
+            mode: "block".to_string(),
             message: "Semantic Compact: this looks like a new task.\n\
                       The previous task may no longer need to stay in active context.\n\
                       Consider running /compact before continuing. \
@@ -187,6 +192,7 @@ pub const ENV_OVERRIDES: &[(&str, &str)] = &[
     ("SC_NEW_TASK_MIN", "thresholds.new_task_min"),
     ("SC_DEPENDS_MAX", "thresholds.depends_max"),
     ("SC_SHARED_CONTEXT_MIN", "thresholds.shared_context_min"),
+    ("SC_REMINDER_MODE", "reminder.mode"),
     ("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "jev.provider"),
     ("JEV_DECISIONS_URL", "jev.url"),
     ("JEV_MODEL", "jev.model"),

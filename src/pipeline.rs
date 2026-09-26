@@ -22,6 +22,10 @@ pub struct PipelineResult {
     pub decision: &'static str,
     pub skip_reason: Option<String>,
     pub system_message: Option<String>,
+    // In block mode a suggestion is returned as a `decision: "block"` that
+    // bounces the prompt back to the user (who then clears/compacts and
+    // re-sends) instead of a fire-and-forget warning nobody can act on.
+    pub block: bool,
 }
 
 // Full judgment pipeline for one submitted prompt. Never fails: every error
@@ -35,6 +39,7 @@ pub fn run(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             decision: "SILENT",
             skip_reason: Some("internal_error".into()),
             system_message: None,
+            block: false,
         },
     }
 }
@@ -76,15 +81,28 @@ fn finish(
             suggested,
         ),
     );
+    let reminder_text = match decision {
+        "SUGGEST_COMPACT" => Some(ctx.config.reminder.message.clone()),
+        "SUGGEST_CLEAR" => Some(ctx.config.reminder.clear_message.clone()),
+        _ => None,
+    };
+    let block = suggested && reminder_text.is_some() && ctx.config.reminder.mode != "remind";
+    let system_message = if block {
+        reminder_text.map(|text| {
+            format!(
+                "{text}\n\nThe prompt was returned to you, not lost. Run /clear or /compact now, \
+                 then re-send it; re-sending it as-is simply continues with the current context."
+            )
+        })
+    } else {
+        reminder_text
+    };
     PipelineResult {
         suggested,
         decision,
         skip_reason: skip_reason.map(String::from),
-        system_message: match decision {
-            "SUGGEST_COMPACT" => Some(ctx.config.reminder.message.clone()),
-            "SUGGEST_CLEAR" => Some(ctx.config.reminder.clear_message.clone()),
-            _ => None,
-        },
+        system_message,
+        block,
     }
 }
 
