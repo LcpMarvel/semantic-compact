@@ -105,8 +105,8 @@ impl Default for JevConfig {
 impl Default for Cooldown {
     fn default() -> Self {
         Self {
-            prompts: 4,
-            seconds: 300,
+            prompts: 1,
+            seconds: 15,
         }
     }
 }

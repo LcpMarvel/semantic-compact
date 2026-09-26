@@ -76,9 +76,10 @@ Judgment behavior:
 - **Continuations stay silent.** Cross-layer shifts that serve one goal
   (OAuth backend → its login button), "add tests for it"-style follow-ups,
   questions about earlier work, and brief tangents are the same task.
-- **Cooldown, not nagging.** After one suggestion the session stays quiet
-  for 4 prompts / 5 minutes — and clearing the conversation rearms it
-  immediately, because acting on a suggestion means it worked.
+- **Cooldown only guards the re-send.** After a suggestion, only the
+  immediate re-sent prompt (and switches within ~15s) are swallowed; the
+  judge's calibrated threshold is the real precision gate. Clearing the
+  conversation rearms it instantly.
 - **Cheap.** ~1 s and ~$0.00003 per judged prompt; slash commands and the
   very first prompt of a session skip the judge entirely.
 
@@ -167,7 +168,7 @@ Full option reference:
     "auth_scheme": "Bearer",           // empty string = send the raw key
     "timeout_ms": 10000
   },
-  "cooldown": { "prompts": 4, "seconds": 300 },
+  "cooldown": { "prompts": 1, "seconds": 15 },
   "history": {
     "max_user_prompts": 8,
     "max_assistant_outcomes": 3,
