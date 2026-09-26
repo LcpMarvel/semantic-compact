@@ -1,0 +1,15 @@
+{
+  "name": "semantic-compact",
+  "description": "semantic-compact — Claude Code task-boundary compact/clear suggestion plugin",
+  "owner": {
+    "name": "LcpMarvel",
+    "url": "https://github.com/LcpMarvel"
+  },
+  "plugins": [
+    {
+      "name": "semantic-compact",
+      "source": "./",
+      "description": "Suggests /compact or /clear when a new task begins: task-boundary detection on every prompt, reminder only — never auto-compacts."
+    }
+  ]
+}

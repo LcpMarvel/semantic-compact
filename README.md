@@ -48,13 +48,27 @@ pricing 页面" is a boundary.
 
 ## Install
 
-Requirements for users: none beyond Claude Code — the Setup hook downloads a
-prebuilt static binary for your platform (macOS arm64/x64, Linux amd64/arm64)
-and verifies its checksum.
+Standard plugin install (this repository is its own marketplace):
 
-- From this repository (local, session-scoped):
-  `claude --plugin-dir /path/to/semantic-compact`
-- Daily driver without flags: install via your marketplace / `claude plugin install`.
+```sh
+claude plugin marketplace add LcpMarvel/semantic-compact
+claude plugin install semantic-compact@semantic-compact
+```
+
+That is all: the Setup hook downloads a prebuilt static binary for your
+platform (macOS arm64/x64, Linux amd64/arm64), verifies its checksum, and
+future updates (`claude plugin update semantic-compact`) re-provision it.
+Restart Claude Code (or start a new session) after installing.
+
+Uninstall: `claude plugin uninstall semantic-compact` and optionally
+`claude plugin marketplace remove semantic-compact`.
+
+Local development instead of installing:
+
+```sh
+cargo build --release && cp target/release/semantic-compact bin/
+claude --plugin-dir /path/to/semantic-compact
+```
 
 Inside an interactive session, `/reload-plugins` picks up code changes.
 
