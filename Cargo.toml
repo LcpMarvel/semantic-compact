@@ -1,6 +1,6 @@
 [package]
 name = "semantic-compact"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 description = "Claude Code plugin: suggests /compact or /clear when a new task begins — task-boundary detection, reminder only"
 license = "MIT"
