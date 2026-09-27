@@ -20,9 +20,9 @@ suggestion.
 the model, and cache reuse only covers what the previous turn started
 with. Stale context from a finished task is dead weight you pay for again
 on every single turn — and the moment to shed it is *before* the new task
-runs, not after you notice the bill. A judgment costs ~$0.00003; a single
+runs, not after you notice the bill. A judgment costs ~$0.00005; a single
 uncached re-send of a 120K-token context costs ~$0.60. Missing the switch
-once is 20,000× the price of watching for it.
+once is 12,000× the price of watching for it.
 
 **It never compacts or clears anything by itself, never rewrites your
 prompt, and every failure path degrades to silence.**
@@ -54,11 +54,13 @@ UserPromptSubmit hook
   → parse transcript: recent real prompts, assistant outcomes, files touched
   → build a compact task-state summary (a few KB, not the whole history)
   → one request to a Jev Decisions endpoint (OpenRouter or TypeSafe direct)
-     asking four typed yes/no probability questions:
+     asking five typed yes/no probability questions:
        p(new_task), p(depends_on_previous_context),
-       p(previous_task_complete), p(shares_context_with_previous_task)
+       p(previous_task_complete), p(shares_context_with_previous_task),
+       p(stale_context)
   → three-way decision:
-       same task / depends on history     → silence
+       same task, still needs old details → silence
+       earlier details mostly obsolete   → suggest /compact (keep durable decisions)
        new task, shares project context   → suggest /compact (a summary still helps)
        new task, essentially unrelated    → suggest /clear (even a summary is dead weight)
 ```
@@ -70,17 +72,27 @@ is the cheaper, cleaner reset.
 
 Judgment behavior:
 
+- **Gradual drift also counts.** The judge sees up to four evenly spaced
+  older prompt excerpts in addition to the recent conversation. With four
+  older samples available and `p_stale_context ≥ 0.80`, it can suggest
+  `/compact` even when the current task still depends on recent turns.
+  This path never suggests `/clear`. The initial threshold was checked on
+  synthetic drift and ongoing-debugging cases; broader calibration is pending.
+  After a suggestion, this path waits a full recent window (8 submissions
+  by default) before suggesting again. A transcript compaction boundary
+  discards pre-compaction evidence; summaries are not counted as new work.
 - **Calibrated on real sessions.** Thresholds ship at
   `p_new ≥ 0.85 AND p_dep ≤ 0.30`; measured clusters are follow-ups
   0.04–0.38, coding tangents ~0.80, genuine switches 0.89–0.98.
-- **Continuations stay silent.** Cross-layer shifts that serve one goal
+- **Continuations are not task switches.** Cross-layer shifts that serve one goal
   (OAuth backend → its login button), "add tests for it"-style follow-ups,
   questions about earlier work, and brief tangents are the same task.
-- **Cooldown only guards the re-send.** After a suggestion, only the
+  They can still qualify for compact if older phases have become obsolete.
+- **Task-switch cooldown guards the re-send.** After a suggestion, only the
   immediate re-sent prompt (and switches within ~15s) are swallowed; the
   judge's calibrated threshold is the real precision gate. Clearing the
   conversation rearms it instantly.
-- **Cheap.** ~1 s and ~$0.00003 per judged prompt; slash commands and the
+- **Cheap.** ~1 s and ~$0.00005 per judged prompt; slash commands and the
   very first prompt of a session skip the judge entirely.
 
 ## Install
@@ -159,7 +171,7 @@ Full option reference:
 
 ```jsonc
 {
-  "thresholds": { "new_task_min": 0.85, "depends_max": 0.3, "shared_context_min": 0.5 },
+  "thresholds": { "new_task_min": 0.85, "depends_max": 0.3, "shared_context_min": 0.5, "stale_context_min": 0.8 },
   "jev": {
     "provider": "openrouter",          // openrouter | typesafe | custom
     "url": "(filled from the provider preset)",
@@ -186,7 +198,7 @@ Full option reference:
 ```
 
 Environment overrides (highest priority): `SC_NEW_TASK_MIN`,
-`SC_DEPENDS_MAX`, `SC_SHARED_CONTEXT_MIN`, `SC_REMINDER_MODE`,
+`SC_DEPENDS_MAX`, `SC_SHARED_CONTEXT_MIN`, `SC_STALE_CONTEXT_MIN`, `SC_REMINDER_MODE`,
 `SC_COOLDOWN_PROMPTS`, `SC_COOLDOWN_SECONDS`, `SC_MAX_PROMPTS`,
 `SC_MIN_PRIOR_PROMPTS`, `SC_LOG_DECISIONS`, `SC_DEBUG`,
 `JEV_DECISIONS_URL`, `JEV_MODEL`, `JEV_AUTH_HEADER`, `JEV_AUTH_SCHEME`,
@@ -214,12 +226,13 @@ Notable semantics:
 
 ### Runtime cost
 
-One judge call per judged prompt (~0.7–1.5 s latency, ~$0.00003 each with
+One judge call per judged prompt (~0.7–1.5 s latency, ~$0.00005 each with
 the default model).
 
 ## Privacy
 
-- **What leaves the machine:** the task-state summary only — recent prompt
+- **What leaves the machine:** the task-state summary only — up to four
+  older prompt excerpts (350 characters each), recent prompt
   texts, short assistant outcome summaries, touched file paths, and the new
   prompt. Never the full transcript, tool outputs, or file contents.
 - **The API key** is read at runtime from env/config/keychain, never
@@ -227,8 +240,9 @@ the default model).
 - **Local logging is opt-in.** A fresh install writes nothing but the
   cooldown state. `"logging": { "decisions": true }` (or
   `SC_LOG_DECISIONS=1`) appends one JSONL line per judgment — timestamp,
-  session id, prompt hash + 120-char preview, the four probabilities,
-  decision, thresholds, latency, cost, error. `logging.debug`
+  session id, prompt hash + 120-char preview, the five probabilities,
+  decision, suggestion reason (`new_task` or `stale_context`), thresholds,
+  latency, cost, error. `logging.debug`
   additionally records the raw task state and judge responses. Nothing is
   ever uploaded.
 - The data dir is `SC_DATA_DIR` → `CLAUDE_PLUGIN_DATA` (installed plugins)
@@ -284,6 +298,13 @@ never the installed cache.
 
 ### Known constraints
 
+- Transcript failures stay silent but have specific log reasons:
+  `transcript_path_missing`, `transcript_not_found`,
+  `transcript_permission_denied`, `transcript_open_error`, and
+  `transcript_read_error`. Older versions grouped missing paths and open
+  failures under `transcript_unreadable`; those old logs cannot distinguish
+  the cause. First prompts of short-lived CLI jobs may run before a
+  transcript file exists. Background task notifications are skipped.
 - Claude Code's transcript JSONL is internal and may change between
   versions; the parser is deliberately defensive and any parse failure
   fails open to silence.

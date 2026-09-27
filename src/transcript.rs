@@ -18,6 +18,7 @@ pub struct ParsedTranscript {
     pub error: Option<String>,
     pub total_user_prompts: usize,
     pub user_prompts: Vec<Entry>,       // oldest first, capped
+    pub older_prompts: Vec<Entry>,      // up to four samples before the recent window
     pub assistant_outcomes: Vec<Entry>, // oldest first, capped
     pub files: Vec<String>,             // most recent first, capped
 }
@@ -38,7 +39,12 @@ impl Default for ParseOpts {
     }
 }
 
-const COMMAND_MARKERS: [&str; 3] = ["<command-name>", "<local-command-stdout>", "Caveat:"];
+const COMMAND_MARKERS: [&str; 4] = [
+    "<command-name>",
+    "<local-command-stdout>",
+    "Caveat:",
+    "<task-notification>",
+];
 
 pub(crate) fn strip_pasted_tags(text: &str) -> String {
     let mut clean = text.to_string();
@@ -110,10 +116,17 @@ fn file_args_from_tool_use(block: &Value) -> Vec<&str> {
 pub fn parse_transcript(path: &Path, opts: &ParseOpts) -> ParsedTranscript {
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
-        Err(_) => {
+        Err(error) => {
             return ParsedTranscript {
                 ok: false,
-                error: Some("transcript_unreadable".into()),
+                error: Some(
+                    match error.kind() {
+                        std::io::ErrorKind::NotFound => "transcript_not_found",
+                        std::io::ErrorKind::PermissionDenied => "transcript_permission_denied",
+                        _ => "transcript_open_error",
+                    }
+                    .into(),
+                ),
                 ..Default::default()
             }
         }
@@ -127,7 +140,11 @@ pub fn parse_transcript(path: &Path, opts: &ParseOpts) -> ParsedTranscript {
 
     let reader = BufReader::new(file);
     for (idx, line) in reader.lines().enumerate() {
-        let Ok(line) = line else { break };
+        let Ok(line) = line else {
+            result.ok = false;
+            result.error = Some("transcript_read_error".into());
+            return result;
+        };
         if line.trim().is_empty() {
             continue;
         }
@@ -139,7 +156,21 @@ pub fn parse_transcript(path: &Path, opts: &ParseOpts) -> ParsedTranscript {
         if obj.get("isSidechain").and_then(Value::as_bool) == Some(true) {
             continue;
         }
+        if obj.get("type").and_then(Value::as_str) == Some("system")
+            && obj.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
+        {
+            result = ParsedTranscript {
+                ok: true,
+                ..Default::default()
+            };
+            files.clear();
+            continue;
+        }
+
         if obj.get("isMeta").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        if obj.get("isCompactSummary").and_then(Value::as_bool) == Some(true) {
             continue;
         }
 
@@ -155,9 +186,6 @@ pub fn parse_transcript(path: &Path, opts: &ParseOpts) -> ParsedTranscript {
                             text: strip_pasted_tags(&text).trim().to_string(),
                             seq: idx,
                         });
-                        if result.user_prompts.len() > opts.max_user_prompts {
-                            result.user_prompts.remove(0);
-                        }
                     }
                 }
             }
@@ -193,6 +221,22 @@ pub fn parse_transcript(path: &Path, opts: &ParseOpts) -> ParsedTranscript {
         // unknown line types (mode, attachment, queue-operation, ...) are skipped
     }
 
+    let older_count = result
+        .user_prompts
+        .len()
+        .saturating_sub(opts.max_user_prompts);
+    let recent = result.user_prompts.split_off(older_count);
+    // ponytail: four evenly spaced prompt samples can miss intermediate details;
+    // increase the sample only if real-session calibration shows missed drift.
+    let sample_count = older_count.min(4);
+    result.older_prompts = (0..sample_count)
+        .map(|i| {
+            result.user_prompts
+                [i * older_count.saturating_sub(1) / sample_count.saturating_sub(1).max(1)]
+            .clone()
+        })
+        .collect();
+    result.user_prompts = recent;
     result.files = files.into_iter().take(opts.max_files).collect();
     result
 }

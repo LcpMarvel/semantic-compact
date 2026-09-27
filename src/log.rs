@@ -127,11 +127,21 @@ pub fn decision_entry(
         "p_depends_on_previous": probabilities.map(|p| p.p_depends_on_previous),
         "p_complete": probabilities.map(|p| p.p_complete),
         "p_shared_context": probabilities.map(|p| p.p_shared_context),
+        "p_stale_context": probabilities.map(|p| p.p_stale_context),
+        "suggestion_reason": probabilities.filter(|_| suggested).map(|p| {
+            if p.p_new_task >= thresholds.new_task_min && p.p_depends_on_previous <= thresholds.depends_max {
+                "new_task"
+            } else {
+                "stale_context"
+            }
+        }),
         "decision": decision,
         "skip_reason": skip_reason,
         "thresholds": {
             "new_task_min": thresholds.new_task_min,
             "depends_max": thresholds.depends_max,
+            "shared_context_min": thresholds.shared_context_min,
+            "stale_context_min": thresholds.stale_context_min,
         },
         "latency_ms": result.map(|r| r.latency_ms),
         "error": result.and_then(|r| r.error.clone()),

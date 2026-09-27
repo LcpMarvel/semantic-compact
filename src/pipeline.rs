@@ -157,6 +157,18 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             None,
         );
     }
+    if prompt.starts_with("<task-notification>") {
+        return finish(
+            &ctx,
+            input,
+            Some("task_notification"),
+            None,
+            None,
+            "SILENT",
+            false,
+            None,
+        );
+    }
 
     let cwd = input.get("cwd").and_then(Value::as_str).map(PathBuf::from);
     let api_key = resolve_api_key(
@@ -223,6 +235,7 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
     let parsed = match input
         .get("transcript_path")
         .and_then(Value::as_str)
+        .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
     {
         Some(path) => parse_transcript(
@@ -235,7 +248,7 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         ),
         None => crate::transcript::ParsedTranscript {
             ok: false,
-            error: Some("transcript_unreadable".into()),
+            error: Some("transcript_path_missing".into()),
             ..Default::default()
         },
     };
@@ -243,7 +256,7 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         return finish(
             &ctx,
             input,
-            Some("transcript_unreadable"),
+            parsed.error.as_deref(),
             None,
             None,
             "SILENT",
@@ -321,6 +334,12 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             .probabilities
             .expect("ok outcome carries probabilities"),
         &ctx.config.thresholds,
+        // Drift persists across adjacent prompts: allow a full recent window
+        // between reminders, while genuine task switches keep their fast rearm.
+        task.has_older_context
+            && (record.last_suggest_ts.is_none()
+                || record.prompts_since_suggest
+                    > ctx.config.history.max_user_prompts.max(1) as u64),
     );
     let suggested = decision != "SILENT";
     let final_record = if suggested {

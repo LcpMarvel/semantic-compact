@@ -47,7 +47,8 @@ fn decision_response(p_new: f64, p_depends: f64, p_complete: f64, p_shared: f64)
             "new_task": { "type": "noul", "noul": p_new },
             "depends_on_previous_context": { "type": "noul", "noul": p_depends },
             "previous_task_complete": { "type": "noul", "noul": p_complete },
-            "shares_context_with_previous_task": { "type": "noul", "noul": p_shared }
+            "shares_context_with_previous_task": { "type": "noul", "noul": p_shared },
+            "stale_context": { "type": "noul", "noul": 0.05 }
         },
         "usage": { "input_tokens": 700, "output_tokens": 60, "cost": 3.0e-5 },
         "id": "gen-dec-test",
@@ -186,19 +187,21 @@ fn decide_threshold_boundaries() {
         new_task_min: 0.90,
         depends_max: 0.20,
         shared_context_min: 0.50,
+        stale_context_min: 0.85,
     };
     let mk = |a: f64, b: f64, c: f64| Probabilities {
         p_new_task: a,
         p_depends_on_previous: b,
         p_complete: 0.5,
         p_shared_context: c,
+        p_stale_context: 0.0,
     };
-    assert_eq!(decide(&mk(0.90, 0.20, 0.50), &t), "SUGGEST_COMPACT");
-    assert_eq!(decide(&mk(0.899, 0.20, 0.50), &t), "SILENT");
-    assert_eq!(decide(&mk(0.95, 0.21, 0.50), &t), "SILENT");
-    assert_eq!(decide(&mk(0.95, 0.10, 0.49), &t), "SUGGEST_CLEAR");
-    assert_eq!(decide(&mk(0.95, 0.10, 0.50), &t), "SUGGEST_COMPACT");
-    assert_eq!(decide(&mk(0.60, 0.10, 0.10), &t), "SILENT"); // tangent: low new_task despite low shared
+    assert_eq!(decide(&mk(0.90, 0.20, 0.50), &t, false), "SUGGEST_COMPACT");
+    assert_eq!(decide(&mk(0.899, 0.20, 0.50), &t, false), "SILENT");
+    assert_eq!(decide(&mk(0.95, 0.21, 0.50), &t, false), "SILENT");
+    assert_eq!(decide(&mk(0.95, 0.10, 0.49), &t, false), "SUGGEST_CLEAR");
+    assert_eq!(decide(&mk(0.95, 0.10, 0.50), &t, false), "SUGGEST_COMPACT");
+    assert_eq!(decide(&mk(0.60, 0.10, 0.10), &t, false), "SILENT"); // tangent: low new_task despite low shared
 }
 
 #[test]
@@ -476,7 +479,149 @@ fn pipeline_fails_open_on_missing_transcript() {
         &data,
         &post,
     );
-    assert_eq!(result.skip_reason.as_deref(), Some("transcript_unreadable"));
+    assert_eq!(result.skip_reason.as_deref(), Some("transcript_not_found"));
+}
+
+#[test]
+fn transcript_errors_and_background_notifications_skip_without_judging() {
+    let data = temp_dir("transcript-errors");
+    let post = |_req: &HttpRequest| -> Result<String, String> { panic!("must not judge") };
+    let mut input = stdin("继续", &fixture("oauth-session.jsonl"));
+    input.as_object_mut().unwrap().remove("transcript_path");
+    let missing = run_pipeline(&input, &data, &post);
+    assert_eq!(
+        missing.skip_reason.as_deref(),
+        Some("transcript_path_missing")
+    );
+    assert!(!missing.block);
+    let bad = data.join("invalid-utf8.jsonl");
+    std::fs::write(&bad, [0xff, b'\n']).unwrap();
+    let result = run_pipeline(&stdin("继续", &bad), &data, &post);
+    assert_eq!(result.skip_reason.as_deref(), Some("transcript_read_error"));
+    assert_eq!(
+        read_decisions(&data).last().unwrap()["skip_reason"],
+        "transcript_read_error"
+    );
+    let notification = "<task-notification>done</task-notification>";
+    assert!(!is_real_user_prompt(notification));
+    let result = run_pipeline(&stdin(notification, &bad), &data, &post);
+    assert_eq!(result.skip_reason.as_deref(), Some("task_notification"));
+}
+
+#[test]
+fn gradual_drift_compacts_with_older_evidence_and_rearms_after_compaction() {
+    let data = temp_dir("gradual-drift");
+    let path = data.join("conversation.jsonl");
+    let prompts = [
+        "选择 TTS 模型",
+        "比较模型价格",
+        "换成 lite",
+        "修改模型配置",
+        "部署模型改动",
+        "看看缓存利用率",
+        "优化缓存",
+        "缓存测试通过",
+        "本地生成试卷",
+        "生成四套试卷",
+        "上传试卷",
+        "检查用户是否做完",
+    ];
+    let mut transcript: String = prompts
+        .iter()
+        .map(|p| format!("{}\n", json!({"type":"user", "message":{"content":p}})))
+        .collect();
+    std::fs::write(&path, &transcript).unwrap();
+    let parsed = parse_transcript(&path, &ParseOpts::default());
+    assert_eq!(parsed.older_prompts.len(), 4);
+    assert_eq!(parsed.older_prompts.first().unwrap().text, prompts[0]);
+    assert_eq!(parsed.user_prompts.len(), 8);
+    let calls = AtomicUsize::new(0);
+    let post = |req: &HttpRequest| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        let request: Value = serde_json::from_str(&req.body).unwrap();
+        assert!(request["questions"]["stale_context"].is_object());
+        let state = request["state"].as_str().unwrap();
+        assert!(state.contains("选择 TTS 模型"));
+        assert!(state.contains("检查用户是否做完"));
+        let mut response: Value =
+            serde_json::from_str(&decision_response(0.59, 0.80, 0.61, 0.78)).unwrap();
+        response["answers"]["stale_context"]["noul"] = json!(0.90);
+        Ok(response.to_string())
+    };
+    let input = stdin("讨论用户访谈计划", &path);
+    let result = run_pipeline(&input, &data, &post);
+    assert_eq!(result.decision, "SUGGEST_COMPACT");
+    assert!(result.block);
+    assert!(!result.system_message.unwrap().contains("new task"));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        read_decisions(&data)[0]["suggestion_reason"],
+        "stale_context"
+    );
+
+    // Once the short resend cooldown expires, drift still waits a recent window.
+    let mut record = load_session(&data, "sess-test").unwrap();
+    record.last_suggest_ts = Some(semantic_compact::decision::now_ms() - 60_000);
+    record.prompts_since_suggest = 2;
+    save_session(&data, "sess-test", &record).unwrap();
+    assert_eq!(run_pipeline(&input, &data, &post).decision, "SILENT");
+    record.prompts_since_suggest = 8;
+    save_session(&data, "sess-test", &record).unwrap();
+    assert!(run_pipeline(&input, &data, &post).suggested);
+
+    transcript.push_str(&format!(
+        "{}\n",
+        json!({"type":"system", "subtype":"compact_boundary"})
+    ));
+    transcript.push_str(&format!("{}\n", json!({"type":"user", "isCompactSummary":true, "message":{"content":"Earlier work summary"}})));
+    std::fs::write(&path, transcript).unwrap();
+    let fresh = parse_transcript(&path, &ParseOpts::default());
+    assert!(fresh.older_prompts.is_empty());
+    assert_eq!(fresh.total_user_prompts, 0);
+    let reset = run_pipeline(&input, &data, &post);
+    assert_eq!(reset.skip_reason.as_deref(), Some("insufficient_history"));
+    assert_eq!(
+        load_session(&data, "sess-test").unwrap().last_suggest_ts,
+        None
+    );
+}
+
+#[test]
+fn stale_context_requires_confidence_and_evidence_and_never_causes_clear() {
+    let thresholds = Thresholds::default();
+    let mut p = Probabilities {
+        p_new_task: 0.59,
+        p_depends_on_previous: 0.8,
+        p_complete: 0.61,
+        p_shared_context: 0.1,
+        p_stale_context: 0.80,
+    };
+    assert_eq!(decide(&p, &thresholds, true), "SUGGEST_COMPACT");
+    assert_eq!(decide(&p, &thresholds, false), "SILENT");
+    p.p_stale_context = 0.799;
+    assert_eq!(decide(&p, &thresholds, true), "SILENT");
+    let post = |_req: &HttpRequest| {
+        let mut response: Value =
+            serde_json::from_str(&decision_response(0.1, 0.9, 0.1, 0.9)).unwrap();
+        response["answers"]["stale_context"]["noul"] = json!(0.99);
+        Ok(response.to_string())
+    };
+    assert_eq!(
+        run_pipeline(
+            &stdin("继续", &fixture("oauth-session.jsonl")),
+            &temp_dir("short-drift"),
+            &post
+        )
+        .decision,
+        "SILENT"
+    );
+    let malformed = |_req: &HttpRequest| {
+        let mut response: Value =
+            serde_json::from_str(&decision_response(0.1, 0.9, 0.1, 0.9)).unwrap();
+        response["answers"]["stale_context"]["noul"] = json!(1.1);
+        Ok(response.to_string())
+    };
+    assert!(!run_judge("state", &JevConfig::default(), "test", &malformed).ok);
 }
 
 #[test]

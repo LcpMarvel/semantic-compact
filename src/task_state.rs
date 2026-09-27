@@ -4,6 +4,7 @@ use crate::transcript::{strip_pasted_tags, ParsedTranscript};
 pub struct TaskState {
     pub state: String,
     pub prior_prompt_count: usize,
+    pub has_older_context: bool,
     pub stats: serde_json::Value,
 }
 
@@ -62,6 +63,17 @@ pub fn build_task_state(
 
     let render = |turns: &[(usize, &str, String)]| -> String {
         let mut parts: Vec<String> = Vec::new();
+        if !parsed.older_prompts.is_empty() {
+            parts.push(
+                "== Earlier conversation samples since last compact (oldest first) ==".to_string(),
+            );
+            for entry in &parsed.older_prompts {
+                parts.push(format!(
+                    "User: {}",
+                    truncate(&collapse_ws(&entry.text), 350)
+                ));
+            }
+        }
         if !turns.is_empty() {
             parts.push("== Recent conversation (oldest first) ==".to_string());
             for (_, role, text) in turns {
@@ -95,11 +107,13 @@ pub fn build_task_state(
         "assistant_outcomes": parsed.assistant_outcomes.len(),
         "files": parsed.files.len(),
         "state_chars": state.len(),
+        "older_prompt_samples": parsed.older_prompts.len(),
     });
 
     TaskState {
         state,
         prior_prompt_count: prior_count,
+        has_older_context: parsed.older_prompts.len() >= 4,
         stats,
     }
 }

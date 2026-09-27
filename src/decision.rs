@@ -29,9 +29,12 @@ struct LegacyState {
 // -> suggest compact (a summary still has value); new unrelated task ->
 // suggest clear (even a summary would be carried dead weight). The shared
 // threshold decides between the two suggestion flavors.
-pub fn decide(p: &Probabilities, t: &Thresholds) -> &'static str {
+pub fn decide(p: &Probabilities, t: &Thresholds, stale_context_eligible: bool) -> &'static str {
     let is_new_task = p.p_new_task >= t.new_task_min && p.p_depends_on_previous <= t.depends_max;
     if !is_new_task {
+        if stale_context_eligible && p.p_stale_context >= t.stale_context_min {
+            return "SUGGEST_COMPACT";
+        }
         return "SILENT";
     }
     if p.p_shared_context >= t.shared_context_min {

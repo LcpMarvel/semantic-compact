@@ -7,6 +7,14 @@ use std::time::{Duration, Instant};
 // re-running the offline fixtures, since thresholds are tuned to it.
 pub fn questions() -> Value {
     json!({
+        "stale_context": {
+            "type": "noul",
+            "instructions": "Compare the earlier conversation samples with the recent conversation and newest prompt. Has the work progressed enough that the earlier detailed context is now mostly obsolete, and a short summary of durable decisions would suffice to continue safely? This can be true even within the same project or a continuing task.",
+            "criteria": {
+                "true": "Earlier phases are finished or superseded and current work has moved on (for example model selection, then completed cache work and deployment, then user feedback). Only a brief summary remains useful; old debugging details and intermediate answers are no longer needed. Dependence on recent turns does NOT mean old details remain necessary.",
+                "false": "No earlier samples are provided, the evidence is unclear, or the user is still investigating the same unresolved issue, reviewing earlier details, or waiting for an active operation whose context is still needed. Length or elapsed time alone is not evidence."
+            }
+        },
         "new_task": {
             "type": "noul",
             "instructions": "Does the newest user prompt begin a materially different task or topic from what the user has been working on or discussing, such that the previous context (debug logs, tool results, explored files, earlier answers) would likely no longer be needed?",
@@ -48,6 +56,7 @@ pub struct Probabilities {
     pub p_depends_on_previous: f64,
     pub p_complete: f64,
     pub p_shared_context: f64,
+    pub p_stale_context: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -147,12 +156,14 @@ pub fn run_judge(state: &str, cfg: &JevConfig, api_key: &str, post: &PostFn) -> 
         noul("depends_on_previous_context"),
         noul("previous_task_complete"),
         noul("shares_context_with_previous_task"),
+        noul("stale_context"),
     ) {
-        (Some(a), Some(b), Some(c), Some(d)) => Probabilities {
+        (Some(a), Some(b), Some(c), Some(d), Some(e)) => Probabilities {
             p_new_task: a,
             p_depends_on_previous: b,
             p_complete: c,
             p_shared_context: d,
+            p_stale_context: e,
         },
         _ => return JudgeOutcome::err("schema", latency),
     };

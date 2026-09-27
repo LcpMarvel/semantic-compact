@@ -30,6 +30,7 @@ pub struct Thresholds {
     pub new_task_min: f64,
     pub depends_max: f64,
     pub shared_context_min: f64,
+    pub stale_context_min: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -84,6 +85,7 @@ impl Default for Thresholds {
             new_task_min: 0.85,
             depends_max: 0.30,
             shared_context_min: 0.50,
+            stale_context_min: 0.80,
         }
     }
 }
@@ -140,8 +142,8 @@ impl Default for Reminder {
             // /clear or /compact BEFORE the old context is consumed;
             // "remind" only shows a warning while the prompt proceeds.
             mode: "block".to_string(),
-            message: "Semantic Compact: this looks like a new task.\n\
-                      The previous task may no longer need to stay in active context.\n\
+            message: "Semantic Compact: earlier conversation details may no longer be needed.\n\
+                      A summary can preserve useful decisions while freeing old context.\n\
                       Consider running /compact before continuing. \
                       (suggestion only — nothing was compacted)"
                 .to_string(),
@@ -201,6 +203,7 @@ pub const ENV_OVERRIDES: &[(&str, &str)] = &[
     ("SC_NEW_TASK_MIN", "thresholds.new_task_min"),
     ("SC_DEPENDS_MAX", "thresholds.depends_max"),
     ("SC_SHARED_CONTEXT_MIN", "thresholds.shared_context_min"),
+    ("SC_STALE_CONTEXT_MIN", "thresholds.stale_context_min"),
     ("SC_REMINDER_MODE", "reminder.mode"),
     ("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER", "jev.provider"),
     ("JEV_DECISIONS_URL", "jev.url"),
