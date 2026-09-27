@@ -1,5 +1,5 @@
 use crate::config::History;
-use crate::transcript::ParsedTranscript;
+use crate::transcript::{strip_pasted_tags, ParsedTranscript};
 
 pub struct TaskState {
     pub state: String,
@@ -14,16 +14,6 @@ pub fn truncate(s: &str, n: usize) -> String {
     }
     let prefix: String = s.chars().take(n.saturating_sub(1)).collect();
     format!("{}…", prefix)
-}
-
-fn strip_pasted_tags(text: &str) -> String {
-    text.lines()
-        .filter(|l| {
-            let t = l.trim();
-            !(t.starts_with("<pasted_content") || t.starts_with("</pasted_content"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn collapse_ws(s: &str) -> String {
@@ -46,7 +36,7 @@ pub fn build_task_state(
         .map(|e| (e.seq, e.text.as_str()))
         .collect();
     if let Some((_, last)) = prior_prompts.last() {
-        if *last == new_prompt.trim() {
+        if *last == strip_pasted_tags(new_prompt).trim() {
             prior_prompts.pop();
             prior_count = prior_count.saturating_sub(1);
         }

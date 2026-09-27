@@ -38,17 +38,24 @@ impl Default for ParseOpts {
     }
 }
 
-const COMMAND_MARKERS: [&str; 5] = [
-    "<command-name>",
-    "<local-command-stdout>",
-    "<pasted_content",
-    "</pasted_content",
-    "Caveat:",
-];
+const COMMAND_MARKERS: [&str; 3] = ["<command-name>", "<local-command-stdout>", "Caveat:"];
+
+pub(crate) fn strip_pasted_tags(text: &str) -> String {
+    let mut clean = text.to_string();
+    for marker in ["<pasted_content", "</pasted_content"] {
+        while let Some(start) = clean.find(marker) {
+            let Some(end) = clean[start..].find('>') else {
+                break;
+            };
+            clean.replace_range(start..start + end + 1, "");
+        }
+    }
+    clean.trim().to_string()
+}
 
 pub fn is_real_user_prompt(text: &str) -> bool {
     let t = text.trim();
-    if t.is_empty() {
+    if t.is_empty() || strip_pasted_tags(t).is_empty() {
         return false;
     }
     if t.starts_with('/') {
@@ -145,7 +152,7 @@ pub fn parse_transcript(path: &Path, opts: &ParseOpts) -> ParsedTranscript {
                     if is_real_user_prompt(&text) {
                         result.total_user_prompts += 1;
                         result.user_prompts.push(Entry {
-                            text: text.trim().to_string(),
+                            text: strip_pasted_tags(&text).trim().to_string(),
                             seq: idx,
                         });
                         if result.user_prompts.len() > opts.max_user_prompts {

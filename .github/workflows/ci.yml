@@ -15,8 +15,9 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: sh scripts/test-setup.sh
       - name: Keep plugin manifest and crate version in sync
         run: |
           crate_v="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"

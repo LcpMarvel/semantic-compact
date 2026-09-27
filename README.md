@@ -145,7 +145,8 @@ lowest to highest:
 API key resolution, high to low:
 
 1. `CLAUDE_PLUGIN_OPTION_JEV_API_KEY` — the dialog / `--config` value
-2. `JEV_API_KEY`, `OPENROUTER_API_KEY`, or `TYPESAFE_API_KEY` in the environment
+2. `JEV_API_KEY`, then the selected provider's key in the environment
+   (`OPENROUTER_API_KEY` or `TYPESAFE_API_KEY`; custom providers use only the generic key)
 3. `"jev": { "api_key": "..." }` in a config JSON layer
 4. `~/.config/semantic-compact/env` (KEY=VALUE lines)
 5. `<project>/.env` next to where Claude Code runs

@@ -1,5 +1,8 @@
 use semantic_compact::config::{load_config, resolve_data_dir, Cooldown, JevConfig, Thresholds};
-use semantic_compact::decision::{bump_and_check, decide, mark_suggested, SessionRecord};
+use semantic_compact::decision::{
+    bump_and_check, decide, load_session, mark_suggested, save_session, SessionRecord,
+};
+use semantic_compact::env::resolve_api_key;
 use semantic_compact::judge::{run_judge, HttpRequest, Probabilities};
 use semantic_compact::pipeline::{run, PipelineOpts};
 use semantic_compact::task_state::build_task_state;
@@ -149,6 +152,9 @@ fn user_prompt_filter_rules() {
         "[Request interrupted by user for tool use]"
     ));
     assert!(!is_real_user_prompt("Caveat: whatever follows"));
+    assert!(is_real_user_prompt(
+        "<pasted_content>/literal text</pasted_content>"
+    ));
 }
 
 #[test]
@@ -252,14 +258,12 @@ fn judge_parses_success_and_failures() {
 }
 
 #[test]
-fn judge_out_of_range_probabilities_are_clamped() {
+fn judge_rejects_out_of_range_probabilities() {
     let cfg = JevConfig::default();
     let resp = |_req: &HttpRequest| Ok(decision_response(1.4, -0.2, 0.5, 0.5));
     let o = run_judge("state", &cfg, "k", &resp);
-    assert!(o.ok);
-    let p = o.probabilities.unwrap();
-    assert_eq!(p.p_new_task, 1.0);
-    assert_eq!(p.p_depends_on_previous, 0.0);
+    assert!(!o.ok);
+    assert_eq!(o.error.as_deref(), Some("schema"));
 }
 
 #[test]
@@ -712,25 +716,210 @@ fn clearing_the_conversation_rearms_the_cooldown() {
 }
 
 #[test]
-fn pipeline_session_record_roundtrips_through_state_file() {
-    let data = temp_dir("statefile");
-    let state = semantic_compact::decision::load_state(&data);
-    assert!(state.sessions.is_empty());
-    let now = semantic_compact::decision::now_ms();
-    let mut sessions = state.sessions.clone();
-    sessions.insert(
-        "s1".to_string(),
-        SessionRecord {
-            last_suggest_ts: Some(42),
-            prompts_since_suggest: 0,
-            last_seen: now,
-            setup_notice_ts: None,
-        },
-    );
-    semantic_compact::decision::save_state(&data, &semantic_compact::decision::State { sessions });
-    let reloaded = semantic_compact::decision::load_state(&data);
+fn api_key_respects_provider_in_env_and_dotenv() {
+    let plugin = temp_dir("keys-plugin");
+    let cwd = temp_dir("keys-cwd");
+    let both = env_map(&[("OPENROUTER_API_KEY", "open"), ("TYPESAFE_API_KEY", "type")]);
     assert_eq!(
-        reloaded.sessions.get("s1").and_then(|r| r.last_suggest_ts),
+        resolve_api_key("openrouter", &both, None, None, &plugin).as_deref(),
+        Some("open")
+    );
+    for provider in ["typesafe", " Official ", "JEV"] {
+        assert_eq!(
+            resolve_api_key(provider, &both, None, None, &plugin).as_deref(),
+            Some("type")
+        );
+    }
+    assert_eq!(resolve_api_key("custom", &both, None, None, &plugin), None);
+    let wrong = env_map(&[("OPENROUTER_API_KEY", "open")]);
+    assert_eq!(
+        resolve_api_key("typesafe", &wrong, None, None, &plugin),
+        None
+    );
+    let common = env_map(&[("JEV_API_KEY", "common"), ("OPENROUTER_API_KEY", "open")]);
+    assert_eq!(
+        resolve_api_key("custom", &common, None, None, &plugin).as_deref(),
+        Some("common")
+    );
+    let option = env_map(&[
+        ("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "option"),
+        ("JEV_API_KEY", "common"),
+    ]);
+    assert_eq!(
+        resolve_api_key("typesafe", &option, None, None, &plugin).as_deref(),
+        Some("option")
+    );
+
+    std::fs::write(
+        cwd.join(".env"),
+        "JEV_API_KEY=\nOPENROUTER_API_KEY=open-file\nTYPESAFE_API_KEY=type-file\n",
+    )
+    .unwrap();
+    let empty = env_map(&[]);
+    assert_eq!(
+        resolve_api_key("typesafe", &empty, None, Some(&cwd), &plugin).as_deref(),
+        Some("type-file")
+    );
+    assert_eq!(
+        resolve_api_key("openrouter", &empty, None, Some(&cwd), &plugin).as_deref(),
+        Some("open-file")
+    );
+    assert_eq!(
+        resolve_api_key("custom", &empty, None, Some(&cwd), &plugin),
+        None
+    );
+    std::fs::write(
+        cwd.join(".env"),
+        "JEV_API_KEY=common-file\nOPENROUTER_API_KEY=open-file\n",
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_api_key("typesafe", &empty, None, Some(&cwd), &plugin).as_deref(),
+        Some("common-file")
+    );
+}
+
+#[test]
+fn pasted_user_prompt_survives_transcript_filter() {
+    let parsed = parse_transcript(&fixture("pasted-session.jsonl"), &ParseOpts::default());
+    assert!(parsed.ok);
+    assert_eq!(parsed.total_user_prompts, 2);
+    assert_eq!(
+        parsed.user_prompts[1].text,
+        "Review this: \nimportant pasted text\n please"
+    );
+    assert!(!parsed.user_prompts[1].text.contains("pasted_content"));
+}
+
+#[test]
+fn pipeline_fails_open_on_invalid_probability() {
+    let data = temp_dir("invalid-prob");
+    let post = |_req: &HttpRequest| Ok(decision_response(1.4, -0.2, 0.5, 0.5));
+    let result = run_pipeline(
+        &stdin("新任务", &fixture("oauth-session.jsonl")),
+        &data,
+        &post,
+    );
+    assert!(!result.block);
+    assert!(!result.suggested);
+    assert_eq!(result.skip_reason.as_deref(), Some("judge_schema"));
+}
+
+#[test]
+fn failed_state_save_and_unknown_session_never_block() {
+    let data = temp_dir("unwritable-state");
+    let blocked_dir = data.join("file-instead-of-dir");
+    std::fs::write(&blocked_dir, "x").unwrap();
+    let post = |_req: &HttpRequest| Ok(decision_response(0.95, 0.05, 0.9, 0.6));
+    let input = stdin("新任务", &fixture("oauth-session.jsonl"));
+    let failed = run_pipeline(&input, &blocked_dir, &post);
+    assert!(failed.suggested);
+    assert!(!failed.block);
+    assert!(!failed.system_message.unwrap().contains("returned to you"));
+
+    let mut unknown = input;
+    unknown.as_object_mut().unwrap().remove("session_id");
+    let result = run_pipeline(&unknown, &data, &post);
+    assert!(result.suggested);
+    assert!(!result.block);
+    assert!(!result.system_message.unwrap().contains("returned to you"));
+}
+
+#[test]
+fn session_files_isolate_parallel_sessions_and_stay_valid_json() {
+    let data = temp_dir("session-files");
+    let now = semantic_compact::decision::now_ms();
+    let write = |id: &'static str, data: PathBuf| {
+        std::thread::spawn(move || {
+            for i in 0..40 {
+                save_session(
+                    &data,
+                    id,
+                    &SessionRecord {
+                        last_suggest_ts: Some(i),
+                        last_seen: now,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+        })
+    };
+    let a = write("a/../session", data.clone());
+    let b = write("other", data.clone());
+    a.join().unwrap();
+    b.join().unwrap();
+    assert_eq!(
+        load_session(&data, "a/../session").unwrap().last_suggest_ts,
+        Some(39)
+    );
+    assert_eq!(
+        load_session(&data, "other").unwrap().last_suggest_ts,
+        Some(39)
+    );
+    let paths: Vec<_> = std::fs::read_dir(data.join("sessions")).unwrap().collect();
+    assert_eq!(paths.len(), 2);
+    for entry in paths {
+        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        assert!(serde_json::from_str::<SessionRecord>(&text).is_ok());
+    }
+}
+
+#[test]
+fn same_session_atomic_write_and_legacy_read() {
+    let data = temp_dir("same-session");
+    let now = semantic_compact::decision::now_ms();
+    std::fs::write(
+        data.join("state.json"),
+        json!({"sessions": {"legacy": {"last_seen": now, "last_suggest_ts": 42}}}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        load_session(&data, "legacy").unwrap().last_suggest_ts,
         Some(42)
     );
+    save_session(
+        &data,
+        "same",
+        &SessionRecord {
+            last_seen: now,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let writers: Vec<_> = (0..2)
+        .map(|worker| {
+            let writer_data = data.clone();
+            std::thread::spawn(move || {
+                for i in 0..100 {
+                    save_session(
+                        &writer_data,
+                        "same",
+                        &SessionRecord {
+                            last_seen: now,
+                            last_suggest_ts: Some(worker * 100 + i),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                }
+            })
+        })
+        .collect();
+    let path = data.join("sessions").join(format!(
+        "{}.json",
+        semantic_compact::log::sha256_hex("same")
+    ));
+    for _ in 0..200 {
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(serde_json::from_str::<SessionRecord>(&text).is_ok());
+    }
+    for writer in writers {
+        writer.join().unwrap();
+    }
+    assert!(load_session(&data, "same")
+        .unwrap()
+        .last_suggest_ts
+        .is_some());
+    assert_eq!(std::fs::read_dir(data.join("sessions")).unwrap().count(), 1);
 }

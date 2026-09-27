@@ -1,0 +1,3 @@
+{"type":"user","message":{"content":"First task"}}
+{"type":"user","message":{"content":"<local-command-stdout>nothing</local-command-stdout>"}}
+{"type":"user","message":{"content":"Review this: <pasted_content id=\"1\">\nimportant pasted text\n</pasted_content id=\"1\"> please"}}

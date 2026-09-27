@@ -55,26 +55,28 @@ if ! curl -fsSL "$base_url/$asset" -o "$tmpdir/$asset"; then
 fi
 
 if ! curl -fsSL "$base_url/SHA256SUMS" -o "$tmpdir/SHA256SUMS"; then
-  log "checksum list unavailable, keeping download unverified"
+  log "checksum list unavailable; skipping install"
+  exit 0
+fi
+expected="$(awk -v f="$asset" '$2 == f { print $1; exit }' "$tmpdir/SHA256SUMS")"
+if [ -z "$expected" ]; then
+  log "checksum missing for $asset; skipping install"
+  exit 0
+fi
+if command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$tmpdir/$asset" | awk '{ print $1 }')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$tmpdir/$asset" | awk '{ print $1 }')"
 else
-  expected="$(awk -v f="$asset" '$2 == f { print $1 }' "$tmpdir/SHA256SUMS")"
-  if [ -n "$expected" ]; then
-    if command -v shasum >/dev/null 2>&1; then
-      actual="$(shasum -a 256 "$tmpdir/$asset" | awk '{ print $1 }')"
-    elif command -v sha256sum >/dev/null 2>&1; then
-      actual="$(sha256sum "$tmpdir/$asset" | awk '{ print $1 }')"
-    else
-      actual=""
-      log "no sha256 tool found, keeping download unverified"
-    fi
-    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-      log "checksum mismatch for $asset"
-      exit 0
-    fi
-  fi
+  log "no sha256 tool found; skipping install"
+  exit 0
+fi
+if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
+  log "checksum mismatch for $asset; skipping install"
+  exit 0
 fi
 
-chmod +x "$tmpdir/$asset"
-mv "$tmpdir/$asset" "$dest"
-log "installed v$version ($triple)"
+if chmod +x "$tmpdir/$asset" && mv "$tmpdir/$asset" "$dest"; then
+  log "installed v$version ($triple)"
+fi
 exit 0

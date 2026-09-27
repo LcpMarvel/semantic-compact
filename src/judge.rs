@@ -75,9 +75,9 @@ impl JudgeOutcome {
     }
 }
 
-fn clamp01(v: f64) -> Option<f64> {
-    if v.is_finite() {
-        Some(v.clamp(0.0, 1.0))
+fn probability(v: f64) -> Option<f64> {
+    if v.is_finite() && (0.0..=1.0).contains(&v) {
+        Some(v)
     } else {
         None
     }
@@ -139,7 +139,7 @@ pub fn run_judge(state: &str, cfg: &JevConfig, api_key: &str, post: &PostFn) -> 
             .get(name)
             .and_then(|a| a.get("noul"))
             .and_then(Value::as_f64)
-            .and_then(clamp01)
+            .and_then(probability)
     };
 
     let probabilities = match (

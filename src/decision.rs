@@ -1,11 +1,13 @@
 use crate::config::{Cooldown, Thresholds};
 use crate::judge::Probabilities;
+use crate::log::sha256_hex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-const STATE_FILE: &str = "state.json";
-const MAX_SESSIONS: usize = 500;
+const STATE_DIR: &str = "sessions";
+static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
 const SESSION_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19,8 +21,8 @@ pub struct SessionRecord {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct State {
-    pub sessions: HashMap<String, SessionRecord>,
+struct LegacyState {
+    sessions: std::collections::HashMap<String, SessionRecord>,
 }
 
 // Three-way judgment: same task -> silence; new task sharing project context
@@ -39,34 +41,78 @@ pub fn decide(p: &Probabilities, t: &Thresholds) -> &'static str {
     }
 }
 
-pub fn load_state(data_dir: &Path) -> State {
-    std::fs::read_to_string(data_dir.join(STATE_FILE))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+fn session_path(data_dir: &Path, session_id: &str) -> PathBuf {
+    data_dir
+        .join(STATE_DIR)
+        .join(format!("{}.json", sha256_hex(session_id)))
 }
 
-// Cooldown state is best-effort: failing to persist must never break the
-// prompt, so errors are swallowed.
-pub fn save_state(data_dir: &Path, state: &State) {
-    let dir = data_dir.to_path_buf();
+pub fn load_session(data_dir: &Path, session_id: &str) -> Option<SessionRecord> {
+    let path = session_path(data_dir, session_id);
+    if path.exists() {
+        return std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<SessionRecord>(&text).ok())
+            .filter(|rec| now_ms().saturating_sub(rec.last_seen) <= SESSION_TTL_MS);
+    }
+    // Existing installs may have one shared state.json. Read it until each
+    // session gets its own file; the next save migrates just that session.
+    std::fs::read_to_string(data_dir.join("state.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<LegacyState>(&text).ok())
+        .and_then(|state| state.sessions.get(session_id).cloned())
+        .filter(|rec| now_ms().saturating_sub(rec.last_seen) <= SESSION_TTL_MS)
+}
+
+pub fn save_session(
+    data_dir: &Path,
+    session_id: &str,
+    record: &SessionRecord,
+) -> std::io::Result<()> {
+    let path = session_path(data_dir, session_id);
+    let dir = path.parent().expect("session path has parent");
+    std::fs::create_dir_all(dir)?;
+    let is_new = !path.exists();
+    let tmp = dir.join(format!(
+        "{}.{}.{}.tmp",
+        sha256_hex(session_id),
+        std::process::id(),
+        NEXT_TMP.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        serde_json::to_writer(&mut file, record).map_err(std::io::Error::other)?;
+        file.flush()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    } else if is_new {
+        prune_expired(dir);
+    }
+    result
+}
+
+// Scan only after a new session is created, so normal prompts touch one file.
+fn prune_expired(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let now = now_ms();
-    let mut sessions: HashMap<String, SessionRecord> = HashMap::new();
-    for (id, rec) in &state.sessions {
-        if sessions.len() >= MAX_SESSIONS {
-            break;
-        }
-        if now.saturating_sub(rec.last_seen) > SESSION_TTL_MS {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        sessions.insert(id.clone(), rec.clone());
-    }
-    let _ = std::fs::create_dir_all(&dir);
-    let tmp = dir.join(STATE_FILE.to_string() + ".tmp");
-    let path = dir.join(STATE_FILE);
-    if let Ok(json) = serde_json::to_string(&State { sessions }) {
-        if std::fs::write(&tmp, json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+        let expired = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<SessionRecord>(&text).ok())
+            .is_some_and(|rec| now.saturating_sub(rec.last_seen) > SESSION_TTL_MS);
+        if expired {
+            let _ = std::fs::remove_file(path);
         }
     }
 }

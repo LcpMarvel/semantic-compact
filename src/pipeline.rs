@@ -1,6 +1,6 @@
 use crate::config::{load_config, resolve_data_dir, resolve_plugin_root};
 use crate::decision::{
-    bump_and_check, decide, load_state, mark_suggested, now_ms, save_state, SessionRecord, State,
+    bump_and_check, decide, load_session, mark_suggested, now_ms, save_session, SessionRecord,
 };
 use crate::env::resolve_api_key;
 use crate::judge::{run_judge, HttpRequest, JudgeOutcome};
@@ -60,15 +60,10 @@ fn finish(
     decision: &'static str,
     suggested: bool,
     record: Option<&SessionRecord>,
-    state: Option<&State>,
 ) -> PipelineResult {
-    if let (Some(record), Some(state)) = (record, state) {
-        if ctx.session_id != "unknown" {
-            let mut sessions = state.sessions.clone();
-            sessions.insert(ctx.session_id.clone(), record.clone());
-            save_state(&ctx.data_dir, &State { sessions });
-        }
-    }
+    let persisted = record.is_some_and(|record| {
+        ctx.session_id != "unknown" && save_session(&ctx.data_dir, &ctx.session_id, record).is_ok()
+    });
     if ctx.config.logging.decisions {
         append_decision(
             &ctx.data_dir,
@@ -88,7 +83,8 @@ fn finish(
         "SUGGEST_CLEAR" => Some(ctx.config.reminder.clear_message.clone()),
         _ => None,
     };
-    let block = suggested && reminder_text.is_some() && ctx.config.reminder.mode != "remind";
+    let block =
+        suggested && persisted && reminder_text.is_some() && ctx.config.reminder.mode != "remind";
     let system_message = if block {
         reminder_text.map(|text| {
             format!(
@@ -147,7 +143,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             None,
-            None,
         );
     }
     if prompt.starts_with('/') {
@@ -160,12 +155,12 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             None,
-            None,
         );
     }
 
     let cwd = input.get("cwd").and_then(Value::as_str).map(PathBuf::from);
     let api_key = resolve_api_key(
+        &ctx.config.jev.provider,
         opts.env_getter,
         ctx.config.jev.api_key.as_deref(),
         cwd.as_deref(),
@@ -175,14 +170,12 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
     let Some(api_key) = api_key else {
         // Inactive plugin: on the first keyless prompt of a session, show
         // how to configure the key, then stay quiet for the rest of it.
-        let mut state = load_state(&ctx.data_dir);
         let notice = if ctx.session_id != "unknown" {
-            let entry = state.sessions.entry(ctx.session_id.clone()).or_default();
-            if entry.setup_notice_ts.is_none() {
-                entry.setup_notice_ts = Some(now);
-                entry.last_seen = now;
-                save_state(&ctx.data_dir, &state);
-                true
+            let mut record = load_session(&ctx.data_dir, &ctx.session_id).unwrap_or_default();
+            if record.setup_notice_ts.is_none() {
+                record.setup_notice_ts = Some(now);
+                record.last_seen = now;
+                save_session(&ctx.data_dir, &ctx.session_id, &record).is_ok()
             } else {
                 false
             }
@@ -197,7 +190,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             None,
             "SILENT",
             false,
-            None,
             None,
         );
         if notice {
@@ -217,17 +209,16 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             None,
-            None,
         );
     }
 
     // Count this turn for the session before anything expensive.
-    let state = load_state(&ctx.data_dir);
-    let (record, suppressed) = bump_and_check(
-        state.sessions.get(&ctx.session_id),
-        now,
-        &ctx.config.cooldown,
-    );
+    let prior = if ctx.session_id == "unknown" {
+        None
+    } else {
+        load_session(&ctx.data_dir, &ctx.session_id)
+    };
+    let (record, suppressed) = bump_and_check(prior.as_ref(), now, &ctx.config.cooldown);
 
     let parsed = match input
         .get("transcript_path")
@@ -258,7 +249,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             Some(&record),
-            Some(&state),
         );
     }
 
@@ -295,7 +285,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             Some(&record),
-            Some(&state),
         );
     }
 
@@ -309,7 +298,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             Some(&record),
-            Some(&state),
         );
     }
 
@@ -325,7 +313,6 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
             "SILENT",
             false,
             Some(&record),
-            Some(&state),
         );
     }
 
@@ -358,6 +345,5 @@ fn run_inner(input: &Value, opts: &PipelineOpts) -> PipelineResult {
         decision,
         suggested,
         Some(&final_record),
-        Some(&state),
     )
 }

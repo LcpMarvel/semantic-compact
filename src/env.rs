@@ -44,11 +44,19 @@ fn read_env_file(path: &Path) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-fn lookup(vars: &HashMap<String, String>) -> Option<&str> {
+fn provider_key(provider: &str) -> Option<&'static str> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "openrouter" => Some("OPENROUTER_API_KEY"),
+        "typesafe" | "official" | "jev" => Some("TYPESAFE_API_KEY"),
+        _ => None,
+    }
+}
+
+fn lookup<'a>(vars: &'a HashMap<String, String>, provider: &str) -> Option<&'a str> {
     vars.get("JEV_API_KEY")
-        .or_else(|| vars.get("OPENROUTER_API_KEY"))
-        .or_else(|| vars.get("TYPESAFE_API_KEY"))
-        .map(|s| s.as_str())
+        .filter(|key| !key.is_empty())
+        .or_else(|| provider_key(provider).and_then(|key| vars.get(key).filter(|v| !v.is_empty())))
+        .map(String::as_str)
 }
 
 // Resolution order (high to low): the plugin option set via /plugin
@@ -58,6 +66,7 @@ fn lookup(vars: &HashMap<String, String>) -> Option<&str> {
 // next to the user's cwd, and finally an .env inside the plugin directory.
 // The key itself is never logged or persisted.
 pub fn resolve_api_key(
+    provider: &str,
     env_getter: &dyn Fn(&str) -> Option<String>,
     json_key: Option<&str>,
     cwd: Option<&Path>,
@@ -69,10 +78,10 @@ pub fn resolve_api_key(
     if let Some(k) = env_getter("JEV_API_KEY").filter(|v| !v.is_empty()) {
         return Some(k);
     }
-    if let Some(k) = env_getter("OPENROUTER_API_KEY").filter(|v| !v.is_empty()) {
-        return Some(k);
-    }
-    if let Some(k) = env_getter("TYPESAFE_API_KEY").filter(|v| !v.is_empty()) {
+    if let Some(k) = provider_key(provider)
+        .and_then(env_getter)
+        .filter(|v| !v.is_empty())
+    {
         return Some(k);
     }
     if let Some(k) = json_key.filter(|v| !v.is_empty()) {
@@ -91,7 +100,7 @@ pub fn resolve_api_key(
     }
 
     for file in candidates {
-        if let Some(k) = lookup(&read_env_file(&file)) {
+        if let Some(k) = lookup(&read_env_file(&file), provider) {
             if !k.is_empty() {
                 return Some(k.to_string());
             }
