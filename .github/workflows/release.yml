@@ -12,12 +12,12 @@ permissions:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Normalize and validate version
         id: ver
@@ -59,13 +59,13 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-latest
             target: x86_64-apple-darwin
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
@@ -82,7 +82,7 @@ jobs:
         run: |
           cp "target/${{ matrix.target }}/release/semantic-compact" "semantic-compact-${{ matrix.target }}"
           { shasum -a 256 "semantic-compact-${{ matrix.target }}" 2>/dev/null || sha256sum "semantic-compact-${{ matrix.target }}"; } >> "SHA256SUMS.part.${{ matrix.target }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: semantic-compact-${{ matrix.target }}
           path: |
@@ -91,9 +91,9 @@ jobs:
 
   release:
     needs: [prepare, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
