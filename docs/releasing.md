@@ -31,7 +31,7 @@
    gh workflow run release.yml --repo LcpMarvel/semantic-compact --ref main -f version=X.Y.Z
    ```
 
-   `X.Y.Z` 替换为已选版本。提交后的 CI 与 release 都要检查；派发成功只表示开始执行，不代表发布成功。该现有工作流的发布提交由 `release-bot` 创建，功能提交仍保留用户署名。
+   `X.Y.Z` 替换为已选版本。补发已有 tag（tag 已推送但 Release 缺失）改用 `-f from_tag=vX.Y.Z`，工作流会跳过版本同步与打 tag，直接从该 tag 构建发布。两个输入互斥。提交后的 CI 与 release 都要检查；派发成功只表示开始执行，不代表发布成功。该现有工作流的发布提交由 `release-bot` 创建，功能提交仍保留用户署名。
 6. 等待对应 release run 完成，确认 tag 指向的代码包含预期改动，并确认 GitHub Release 有工作流矩阵中的四个平台二进制及 `SHA256SUMS`。任一平台构建或上传失败都应报告为“发布未完成”，不能只凭 tag 宣称已发版。
 7. 获取远端发布提交和 tag；工作区干净且可快进时同步本地 `main`。需要升级本机插件时使用正式版本，并核对实际安装版本和 hook；不要把替换旧缓存二进制当成正式升级。
 8. 回报提交、tag、Release 链接、验证结果及未完成项。在本文件末尾补一条简短发版记录，不复制运行日志。
@@ -39,7 +39,7 @@
 ## 只打 tag、失败重试与本地补丁
 
 - 用户明确只要求 commit / push / tag 时，按该范围执行：本地同步三处版本、验证、提交、创建带说明的 tag，再以 `git push --atomic origin main refs/tags/vX.Y.Z` 推送。明确说明尚未生成 Release 安装包。
-- **当前工作流不会因 tag push 自动运行，也不支持补发已有 tag。** 如果 tag 已存在而 Release/安装包缺失，不要原样重跑创建同名 tag 的步骤。优先续跑已存在的失败 run；若从未有过发布 run，要从该 tag 构建并补齐资产，或先最小修改工作流以支持已有 tag。不要移动旧 tag，也不要把别的提交编译成旧 tag 的安装包。
+- **当前工作流不会因 tag push 自动运行。** tag 已存在而 Release/安装包缺失时，用 `from_tag` 从该 tag 补发（见上文第 5 步）；工作流要求 tag 所指提交的 `Cargo.toml` 与 `plugin.json` 版本和 tag 一致，否则拒绝。优先续跑已存在的失败 run。不要移动旧 tag，也不要把别的提交编译成旧 tag 的安装包。
 - 本地缓存补丁只是临时修复，升级可能覆盖。正式版本发布后核对实际安装状态；保留必要备份，不将补丁伪装成已发布版本。
 - 若实际使用 Claude 执行器，使用 `zclaude`。
 

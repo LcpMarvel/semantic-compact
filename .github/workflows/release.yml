@@ -4,8 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 0.2.0 (no leading v)"
-        required: true
+        description: "Version to release, e.g. 0.2.0 (no leading v); ignored when from_tag is set"
+        required: false
+      from_tag:
+        description: "Existing tag to backfill a release from, e.g. v0.2.9 (no bump, no new tag)"
+        required: false
 
 permissions:
   contents: write
@@ -23,18 +26,38 @@ jobs:
         id: ver
         run: |
           v="${{ github.event.inputs.version }}"
-          case "$v" in
-            v*) v="${v#v}" ;;
-          esac
+          from_tag="${{ github.event.inputs.from_tag }}"
+          case "$v" in v*) v="${v#v}" ;; esac
+          case "$from_tag" in v*) from_tag="${from_tag#v}" ;; esac
+          if [ -n "$v" ] && [ -n "$from_tag" ]; then
+            echo "pass either version or from_tag, not both" >&2; exit 1
+          fi
+          if [ -n "$from_tag" ]; then
+            # Backfill: build the release from a tag that already exists on origin.
+            git fetch --no-tags origin "refs/tags/v$from_tag:refs/tags/v$from_tag" || {
+              echo "tag v$from_tag not found on origin" >&2; exit 1;
+            }
+            c="$(git rev-list -n1 "refs/tags/v$from_tag")"
+            [ -n "$c" ] || { echo "tag v$from_tag resolves to no commit" >&2; exit 1; }
+            cv="$(git show "$c":Cargo.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -n1)"
+            pv="$(git show "$c":.claude-plugin/plugin.json | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -n1)"
+            if [ "$cv" != "$from_tag" ] || [ "$pv" != "$from_tag" ]; then
+              echo "tag v$from_tag carries Cargo.toml=$cv plugin.json=$pv, expected $from_tag" >&2; exit 1
+            fi
+            echo "version=$from_tag" >> "$GITHUB_OUTPUT"
+            echo "tag=v$from_tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
             echo "invalid version: $v" >&2; exit 1;
           }
-          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
             echo "tag v$v already exists" >&2; exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
       - name: Bump versions
+        if: ${{ github.event.inputs.from_tag == '' }}
         run: |
           v="${{ steps.ver.outputs.version }}"
           sed -i.bak "s/^version = \".*\"/version = \"$v\"/" Cargo.toml && rm Cargo.toml.bak
@@ -42,6 +65,7 @@ jobs:
           grep -q "\"version\": \"$v\"" .claude-plugin/plugin.json
           cargo update --workspace
       - name: Commit and tag
+        if: ${{ github.event.inputs.from_tag == '' }}
         run: |
           git config user.name "release-bot"
           git config user.email "release-bot@users.noreply.github.com"
